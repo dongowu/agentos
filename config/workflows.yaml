@@ -1,36 +1,62 @@
-# AI Orchestrator - Workflow Definitions
-
 workflows:
-  default:
-    name: "标准开发流程"
+  mvp:
+    name: MVP
     stages:
       - id: prd
-        name: "需求分析"
+        name: PRD
         agent: pm
-        collaborators: [architect]
-        humanGate: true
         outputs:
           - type: prd
-            name: "PRD.md"
-          - type: acceptance-criteria
-            name: "acceptance-criteria.md"
-
-      - id: design
-        name: "架构设计"
-        agent: architect
-        collaborators: [coder]
-        humanGate: true
+            name: PRD.md
+      - id: implementation
+        name: Implementation
+        agent: coder
+        collaborators: [pm]
         inputs:
           - fromStage: prd
             type: prd
         outputs:
-          - type: tech-design
-            name: "tech-design.md"
-          - type: task-list
-            name: "tasks.md"
+          - type: source-code
+            name: source.md
 
+  default:
+    name: Default
+    stages:
+      - id: prd
+        name: PRD
+        agent: pm
+        collaborators: [architect]
+        outputs:
+          - type: prd
+            name: PRD.md
+          - type: acceptance-criteria
+            name: acceptance-criteria.md
+      - id: alignment
+        name: Alignment
+        agent: architect
+        collaborators: [pm, coder, reviewer, tester]
+        inputs:
+          - fromStage: prd
+            type: prd
+          - fromStage: prd
+            type: acceptance-criteria
+        outputs:
+          - type: discussion-summary
+            name: alignment-summary.md
+      - id: design
+        name: Design
+        agent: architect
+        collaborators: [coder]
+        inputs:
+          - fromStage: alignment
+            type: discussion-summary
+        outputs:
+          - type: tech-design
+            name: tech-design.md
+          - type: task-list
+            name: tasks.md
       - id: implementation
-        name: "代码实现"
+        name: Implementation
         agent: coder
         collaborators: [architect]
         inputs:
@@ -40,10 +66,9 @@ workflows:
             type: task-list
         outputs:
           - type: source-code
-            name: "source"
-
+            name: source.md
       - id: review
-        name: "代码审查"
+        name: Review
         agent: reviewer
         collaborators: [coder]
         inputs:
@@ -51,61 +76,49 @@ workflows:
             type: source-code
         outputs:
           - type: review-report
-            name: "review-report.md"
-        onReject:
-          gotoStage: implementation
-
+            name: review.md
       - id: testing
-        name: "测试"
+        name: Testing
         agent: tester
         collaborators: [coder]
         inputs:
           - fromStage: implementation
             type: source-code
-          - fromStage: prd
-            type: acceptance-criteria
+          - fromStage: review
+            type: review-report
         outputs:
-          - type: test-code
-            name: "tests"
           - type: test-report
-            name: "test-report.md"
-        onReject:
-          gotoStage: implementation
+            name: testing.md
 
-      - id: acceptance
-        name: "验收"
-        agent: pm
-        inputs:
-          - fromStage: testing
-            type: test-report
-          - fromStage: prd
-            type: acceptance-criteria
-        outputs:
-          - type: acceptance-report
-            name: "acceptance-report.md"
-        onReject:
-          gotoStage: prd
-
-  # MVP 简化流程 (第一期)
-  mvp:
-    name: "MVP 简化流程"
+  autonomy:
+    name: Autonomy
     stages:
-      - id: prd
-        name: "需求分析"
-        agent: pm
-        collaborators: [coder]
-        humanGate: false
-        outputs:
-          - type: prd
-            name: "PRD.md"
-
       - id: implementation
-        name: "代码实现"
+        name: Implementation
         agent: coder
-        collaborators: [pm]
-        inputs:
-          - fromStage: prd
-            type: prd
+        collaborators: [architect]
         outputs:
           - type: source-code
-            name: "source"
+            name: source.md
+      - id: review
+        name: Review
+        agent: reviewer
+        collaborators: [coder]
+        inputs:
+          - fromStage: implementation
+            type: source-code
+        outputs:
+          - type: review-report
+            name: review.md
+      - id: testing
+        name: Testing
+        agent: tester
+        collaborators: [coder]
+        inputs:
+          - fromStage: implementation
+            type: source-code
+          - fromStage: review
+            type: review-report
+        outputs:
+          - type: test-report
+            name: testing.md
