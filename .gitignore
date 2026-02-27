@@ -2,6 +2,7 @@ target/
 data/
 .env
 .claude/
+.worktrees/
 *.db
 *.db-journal
 drizzle/
