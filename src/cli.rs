@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -6,6 +7,7 @@ use clap::{Parser, Subcommand};
 use crate::gitops::rollback_to_checkpoint;
 use crate::guard::ExecutionGuard;
 use crate::jobs::JobService;
+use crate::server::create_app;
 
 #[derive(Debug, Parser)]
 #[command(name = "orch-rs", version, about = "Rust AI Orchestrator CLI")]
@@ -64,9 +66,14 @@ enum Commands {
     Rollback { workdir: PathBuf, commit: String },
     /// Validate a shell command against hard guardrails
     GuardShell { command: String },
+    /// Start the HTTP API server
+    Serve {
+        #[arg(long, default_value = "127.0.0.1:3000")]
+        addr: String,
+    },
 }
 
-pub fn run() -> Result<()> {
+pub async fn run() -> Result<()> {
     let cli = Cli::parse();
     let service =
         JobService::new_with_workflow_file(&cli.db, &cli.data_dir, cli.workflow_file.as_deref())?;
@@ -151,6 +158,13 @@ pub fn run() -> Result<()> {
         Commands::GuardShell { command } => {
             let decision = ExecutionGuard::default().validate_shell(&command);
             println!("{}", serde_json::to_string_pretty(&decision)?);
+        }
+        Commands::Serve { addr } => {
+            let app = create_app(service);
+            let addr: SocketAddr = addr.parse()?;
+            println!("Starting server on {}", addr);
+            let listener = tokio::net::TcpListener::bind(addr).await?;
+            axum::serve(listener, app).await?;
         }
     }
 

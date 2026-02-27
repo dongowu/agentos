@@ -78,6 +78,55 @@ cargo run -- resume <job_id>
 cargo run -- trace <pipeline_id>
 ```
 
+## HTTP API
+
+启动 API 服务器：
+
+```bash
+cargo run -- serve --addr 127.0.0.1:3000
+```
+
+### 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/jobs` | 提交任务 |
+| POST | `/jobs/work` | 处理队列 (body: usize) |
+| GET | `/jobs/:job_id` | 查询任务状态 |
+| GET | `/jobs/:job_id/result` | 获取任务结果 |
+| POST | `/jobs/:job_id/resume` | 恢复暂停的任务 |
+| GET | `/decisions` | 列出待审批决策 |
+| POST | `/decisions/:decision_id/approve` | 批准决策 |
+| POST | `/decisions/:decision_id/reject` | 拒绝决策 |
+| GET | `/trace/:pipeline_id` | 获取管道追踪 |
+
+### 示例
+
+```bash
+# 启动服务
+cargo run -- serve &
+
+# 提交任务
+curl -X POST http://127.0.0.1:3000/jobs \
+  -H "Content-Type: application/json" \
+  -d '{"requirement": "实现支付重试机制", "workflow": "autonomy"}'
+
+# 处理队列
+curl -X POST http://127.0.0.1:3000/jobs/work -H "Content-Type: application/json" -d '8'
+
+# 查询状态
+curl http://127.0.0.1:3000/jobs/<job_id>
+
+# 查看待审批
+curl http://127.0.0.1:3000/decisions
+
+# 批准决策
+curl -X POST http://127.0.0.1:3000/decisions/<decision_id>/approve
+
+# 恢复任务
+curl -X POST http://127.0.0.1:3000/jobs/<job_id>/resume
+```
+
 ## 工作流配置
 
 - 默认内置工作流来自 `src/workflow_config.rs`

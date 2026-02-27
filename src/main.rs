@@ -5,8 +5,11 @@ mod jobs;
 mod messaging;
 mod pipeline;
 mod rag;
+mod server;
 mod workflow_config;
 
 fn main() -> anyhow::Result<()> {
-    cli::run()
+    tokio::runtime::Runtime::new()?.block_on(async {
+        cli::run().await
+    })
 }
