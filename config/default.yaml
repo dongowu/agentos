@@ -1,0 +1,48 @@
+# AI Orchestrator - Default Configuration
+
+app:
+  name: ai-orchestrator
+  dataDir: ./data
+  logLevel: info
+
+llm:
+  defaultTimeout: 120000
+  maxRetries: 3
+  cooldownMs: 30000
+
+  tiers:
+    reasoning:
+      providers:
+        - name: anthropic
+          model: claude-opus-4-6
+        - name: openai
+          model: gpt-5.3-codex-high
+        - name: deepseek
+          model: deepseek-reasoner
+    balanced:
+      providers:
+        - name: anthropic
+          model: claude-sonnet-4-6
+        - name: openai
+          model: gpt-5.3-codex-high
+        - name: deepseek
+          model: deepseek-chat
+    fast:
+      providers:
+        - name: deepseek
+          model: deepseek-chat
+        - name: anthropic
+          model: claude-haiku-4-5-20251001
+        - name: openai
+          model: gpt-5.3-codex-high
+
+workflow:
+  maxDiscussionRounds: 5
+  discussionTimeoutMs: 300000
+  humanGates:
+    - afterPrd
+    - afterDesign
+
+web:
+  port: 3000
+  host: "0.0.0.0"

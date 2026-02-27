@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/
+.env
+.claude/
+*.db
+*.db-journal
+drizzle/

@@ -1,0 +1,111 @@
+# AI Orchestrator - Workflow Definitions
+
+workflows:
+  default:
+    name: "标准开发流程"
+    stages:
+      - id: prd
+        name: "需求分析"
+        agent: pm
+        collaborators: [architect]
+        humanGate: true
+        outputs:
+          - type: prd
+            name: "PRD.md"
+          - type: acceptance-criteria
+            name: "acceptance-criteria.md"
+
+      - id: design
+        name: "架构设计"
+        agent: architect
+        collaborators: [coder]
+        humanGate: true
+        inputs:
+          - fromStage: prd
+            type: prd
+        outputs:
+          - type: tech-design
+            name: "tech-design.md"
+          - type: task-list
+            name: "tasks.md"
+
+      - id: implementation
+        name: "代码实现"
+        agent: coder
+        collaborators: [architect]
+        inputs:
+          - fromStage: design
+            type: tech-design
+          - fromStage: design
+            type: task-list
+        outputs:
+          - type: source-code
+            name: "source"
+
+      - id: review
+        name: "代码审查"
+        agent: reviewer
+        collaborators: [coder]
+        inputs:
+          - fromStage: implementation
+            type: source-code
+        outputs:
+          - type: review-report
+            name: "review-report.md"
+        onReject:
+          gotoStage: implementation
+
+      - id: testing
+        name: "测试"
+        agent: tester
+        collaborators: [coder]
+        inputs:
+          - fromStage: implementation
+            type: source-code
+          - fromStage: prd
+            type: acceptance-criteria
+        outputs:
+          - type: test-code
+            name: "tests"
+          - type: test-report
+            name: "test-report.md"
+        onReject:
+          gotoStage: implementation
+
+      - id: acceptance
+        name: "验收"
+        agent: pm
+        inputs:
+          - fromStage: testing
+            type: test-report
+          - fromStage: prd
+            type: acceptance-criteria
+        outputs:
+          - type: acceptance-report
+            name: "acceptance-report.md"
+        onReject:
+          gotoStage: prd
+
+  # MVP 简化流程 (第一期)
+  mvp:
+    name: "MVP 简化流程"
+    stages:
+      - id: prd
+        name: "需求分析"
+        agent: pm
+        collaborators: [coder]
+        humanGate: false
+        outputs:
+          - type: prd
+            name: "PRD.md"
+
+      - id: implementation
+        name: "代码实现"
+        agent: coder
+        collaborators: [pm]
+        inputs:
+          - fromStage: prd
+            type: prd
+        outputs:
+          - type: source-code
+            name: "source"
