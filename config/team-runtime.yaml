@@ -1,7 +1,37 @@
 gate_policy: unanimous
 arbiter_policy: two_round
+merge_policy: strict
+merge_auto_rework: false
+max_merge_retries: 1
+merge_rework_routes:
+  generic:
+    route_name: generic
+    task_suffix: generic
+    team_id: program_board
+    role: supervisor@supervisor.primary
+    actor_summary: supervisor
+  code-conflict:
+    route_name: code-conflict
+    task_suffix: code
+    team_id: platform_team
+    role: architect@architect.primary
+    actor_summary: platform architect
+  api-conflict:
+    route_name: api-conflict
+    task_suffix: api
+    team_id: feature_team
+    role: architect@architect.primary
+    actor_summary: feature architect
+  test-conflict:
+    route_name: test-conflict
+    task_suffix: test
+    team_id: qa_team
+    role: tester@tester.primary
+    actor_summary: qa lead
 role_failover: false
 max_role_attempts: 2
+team_topology: single
+max_parallel_teams: 1
 role_instances:
   coder:
     - coder.primary

@@ -3,10 +3,12 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use anyhow::Result;
 
-use crate::core::models::{Department, GateId, GateVote, GoalContract, TaskNode, TaskReport};
+use crate::core::models::{
+    Department, GateId, GateVote, GoalContract, MergeOutcome, TaskNode, TaskReport,
+};
 use crate::plugins::{
-    ArbiterDecision, ArbiterPolicy, GatePolicy, RiskPolicy, RoleExecution, RoleProvider,
-    TeamStrategy,
+    ArbiterDecision, ArbiterPolicy, GatePolicy, MergePolicy, RiskPolicy, RoleExecution,
+    RoleProvider, TeamStrategy,
 };
 
 pub struct BuiltinRoleProvider {
@@ -84,13 +86,21 @@ impl RoleProvider for BuiltinRoleProvider {
     }
 }
 
-pub struct BuiltinTeamStrategy;
+pub struct BuiltinTeamStrategy {
+    topology: String,
+}
 
-impl TeamStrategy for BuiltinTeamStrategy {
-    fn build_task_graph(&self, requirement: &str, _goal: &GoalContract) -> Vec<TaskNode> {
+impl BuiltinTeamStrategy {
+    pub fn new(topology: String) -> Self {
+        Self { topology }
+    }
+
+    fn single_team_graph(requirement: &str) -> Vec<TaskNode> {
+        let team_id = "delivery_core".to_string();
         vec![
             TaskNode {
                 id: "intake".to_string(),
+                team_id: team_id.clone(),
                 title: format!("Intake and scope requirement: {}", requirement),
                 owner_role: "product_lead".to_string(),
                 department: Department::Product,
@@ -98,6 +108,7 @@ impl TeamStrategy for BuiltinTeamStrategy {
             },
             TaskNode {
                 id: "design".to_string(),
+                team_id: team_id.clone(),
                 title: "Create technical design".to_string(),
                 owner_role: "architect".to_string(),
                 department: Department::Engineering,
@@ -105,6 +116,7 @@ impl TeamStrategy for BuiltinTeamStrategy {
             },
             TaskNode {
                 id: "implementation".to_string(),
+                team_id: team_id.clone(),
                 title: "Implement delivery plan".to_string(),
                 owner_role: "coder".to_string(),
                 department: Department::Engineering,
@@ -112,6 +124,7 @@ impl TeamStrategy for BuiltinTeamStrategy {
             },
             TaskNode {
                 id: "qa_validation".to_string(),
+                team_id: team_id.clone(),
                 title: "Run functional and regression tests".to_string(),
                 owner_role: "tester".to_string(),
                 department: Department::Qa,
@@ -119,6 +132,7 @@ impl TeamStrategy for BuiltinTeamStrategy {
             },
             TaskNode {
                 id: "security_review".to_string(),
+                team_id: team_id.clone(),
                 title: "Review security and compliance risk".to_string(),
                 owner_role: "security_lead".to_string(),
                 department: Department::Security,
@@ -126,6 +140,7 @@ impl TeamStrategy for BuiltinTeamStrategy {
             },
             TaskNode {
                 id: "release_plan".to_string(),
+                team_id: team_id.clone(),
                 title: "Prepare release checklist and rollback".to_string(),
                 owner_role: "release_manager".to_string(),
                 department: Department::Ops,
@@ -133,12 +148,112 @@ impl TeamStrategy for BuiltinTeamStrategy {
             },
             TaskNode {
                 id: "retrospective".to_string(),
+                team_id,
                 title: "Close project and capture lessons learned".to_string(),
                 owner_role: "product_lead".to_string(),
                 department: Department::Product,
                 depends_on: vec!["release_plan".to_string()],
             },
         ]
+    }
+
+    fn multi_team_graph(requirement: &str) -> Vec<TaskNode> {
+        vec![
+            TaskNode {
+                id: "intake".to_string(),
+                team_id: "program_board".to_string(),
+                title: format!("Intake and scope requirement: {}", requirement),
+                owner_role: "product_lead".to_string(),
+                department: Department::Product,
+                depends_on: Vec::new(),
+            },
+            TaskNode {
+                id: "platform_design".to_string(),
+                team_id: "platform_team".to_string(),
+                title: "Platform team creates shared technical design".to_string(),
+                owner_role: "architect".to_string(),
+                department: Department::Engineering,
+                depends_on: vec!["intake".to_string()],
+            },
+            TaskNode {
+                id: "feature_design".to_string(),
+                team_id: "feature_team".to_string(),
+                title: "Feature team defines delivery increments".to_string(),
+                owner_role: "architect".to_string(),
+                department: Department::Engineering,
+                depends_on: vec!["intake".to_string()],
+            },
+            TaskNode {
+                id: "platform_impl".to_string(),
+                team_id: "platform_team".to_string(),
+                title: "Platform team implementation".to_string(),
+                owner_role: "coder".to_string(),
+                department: Department::Engineering,
+                depends_on: vec!["platform_design".to_string()],
+            },
+            TaskNode {
+                id: "feature_impl".to_string(),
+                team_id: "feature_team".to_string(),
+                title: "Feature team implementation".to_string(),
+                owner_role: "coder".to_string(),
+                department: Department::Engineering,
+                depends_on: vec!["feature_design".to_string()],
+            },
+            TaskNode {
+                id: "platform_qa".to_string(),
+                team_id: "qa_team".to_string(),
+                title: "QA validates platform deliverables".to_string(),
+                owner_role: "tester".to_string(),
+                department: Department::Qa,
+                depends_on: vec!["platform_impl".to_string()],
+            },
+            TaskNode {
+                id: "feature_qa".to_string(),
+                team_id: "qa_team".to_string(),
+                title: "QA validates feature deliverables".to_string(),
+                owner_role: "tester".to_string(),
+                department: Department::Qa,
+                depends_on: vec!["feature_impl".to_string()],
+            },
+            TaskNode {
+                id: "security_review".to_string(),
+                team_id: "security_team".to_string(),
+                title: "Review security and compliance risk".to_string(),
+                owner_role: "security_lead".to_string(),
+                department: Department::Security,
+                depends_on: vec!["platform_impl".to_string(), "feature_impl".to_string()],
+            },
+            TaskNode {
+                id: "release_plan".to_string(),
+                team_id: "release_team".to_string(),
+                title: "Prepare release checklist and rollback".to_string(),
+                owner_role: "release_manager".to_string(),
+                department: Department::Ops,
+                depends_on: vec![
+                    "platform_qa".to_string(),
+                    "feature_qa".to_string(),
+                    "security_review".to_string(),
+                ],
+            },
+            TaskNode {
+                id: "retrospective".to_string(),
+                team_id: "program_board".to_string(),
+                title: "Close project and capture lessons learned".to_string(),
+                owner_role: "product_lead".to_string(),
+                department: Department::Product,
+                depends_on: vec!["release_plan".to_string()],
+            },
+        ]
+    }
+}
+
+impl TeamStrategy for BuiltinTeamStrategy {
+    fn build_task_graph(&self, requirement: &str, _goal: &GoalContract) -> Vec<TaskNode> {
+        if self.topology == "multi" {
+            Self::multi_team_graph(requirement)
+        } else {
+            Self::single_team_graph(requirement)
+        }
     }
 }
 
@@ -289,6 +404,113 @@ impl ArbiterPolicy for EscalateImmediatelyArbiter {
                 gate
             ),
             escalated_to_human: true,
+        }
+    }
+}
+
+pub struct StrictMergePolicy;
+
+impl MergePolicy for StrictMergePolicy {
+    fn merge(&self, reports: &[TaskReport], requirement: &str) -> MergeOutcome {
+        let has_cross_team_reports = reports.iter().any(|r| r.team_id == "platform_team")
+            && reports.iter().any(|r| r.team_id == "feature_team");
+        if !has_cross_team_reports {
+            return MergeOutcome {
+                approved: true,
+                attempts: 1,
+                note: "single-team delivery, no cross-team merge required".to_string(),
+                escalated_to_human: false,
+            };
+        }
+
+        if has_merge_conflict_marker(requirement) {
+            if has_expected_rework_evidence(reports, requirement) {
+                return MergeOutcome {
+                    approved: true,
+                    attempts: 2,
+                    note: "merge conflict resolved after automated rework".to_string(),
+                    escalated_to_human: false,
+                };
+            }
+            if requirement.contains("[[merge:retry-ok]]") {
+                return MergeOutcome {
+                    approved: true,
+                    attempts: 2,
+                    note: "merge conflict resolved on retry with supervisor guidance".to_string(),
+                    escalated_to_human: false,
+                };
+            }
+            return MergeOutcome {
+                approved: false,
+                attempts: 2,
+                note: "merge conflict persists after retry, escalation required".to_string(),
+                escalated_to_human: true,
+            };
+        }
+
+        MergeOutcome {
+            approved: true,
+            attempts: 1,
+            note: "cross-team artifacts merged successfully".to_string(),
+            escalated_to_human: false,
+        }
+    }
+}
+
+fn has_merge_conflict_marker(requirement: &str) -> bool {
+    requirement.contains("[[merge:conflict]]")
+        || requirement.contains("[[merge:code-conflict]]")
+        || requirement.contains("[[merge:api-conflict]]")
+        || requirement.contains("[[merge:test-conflict]]")
+}
+
+fn has_expected_rework_evidence(reports: &[TaskReport], requirement: &str) -> bool {
+    let expected_suffix = if requirement.contains("[[merge:code-conflict]]") {
+        "code"
+    } else if requirement.contains("[[merge:api-conflict]]") {
+        "api"
+    } else if requirement.contains("[[merge:test-conflict]]") {
+        "test"
+    } else {
+        "generic"
+    };
+
+    reports.iter().any(|report| {
+        report
+            .task_id
+            .starts_with(&format!("merge_rework_{}", expected_suffix))
+    })
+}
+
+pub struct FastMergePolicy;
+
+impl MergePolicy for FastMergePolicy {
+    fn merge(&self, reports: &[TaskReport], requirement: &str) -> MergeOutcome {
+        let has_cross_team_reports = reports.iter().any(|r| r.team_id == "platform_team")
+            && reports.iter().any(|r| r.team_id == "feature_team");
+        if !has_cross_team_reports {
+            return MergeOutcome {
+                approved: true,
+                attempts: 1,
+                note: "single-team delivery, no cross-team merge required".to_string(),
+                escalated_to_human: false,
+            };
+        }
+
+        if requirement.contains("[[merge:block]]") {
+            return MergeOutcome {
+                approved: false,
+                attempts: 1,
+                note: "fast merge policy blocked by explicit requirement marker".to_string(),
+                escalated_to_human: true,
+            };
+        }
+
+        MergeOutcome {
+            approved: true,
+            attempts: 1,
+            note: "fast merge accepted artifacts without retry".to_string(),
+            escalated_to_human: false,
         }
     }
 }

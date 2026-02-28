@@ -83,6 +83,18 @@ cargo run -- team-run "交付一个用户登录系统" --max-parallel 3
 # 运行时动态调整策略（命令行覆盖）
 cargo run -- team-run "交付一个用户登录系统" --gate-policy majority --arbiter-policy immediate_escalation
 
+# 切换跨团队合并策略
+cargo run -- team-run "交付一个用户登录系统" --team-topology multi --merge-policy fast
+
+# 合并冲突自动回滚+重试编排
+cargo run -- team-run "交付一个用户登录系统 [[merge:conflict]]" --team-topology multi --merge-policy strict --enable-merge-auto-rework --max-merge-retries 2
+
+# 按冲突类型路由自动修复子流程
+cargo run -- team-run "交付一个用户登录系统 [[merge:api-conflict]]" --team-topology multi --merge-policy strict --enable-merge-auto-rework
+
+# 启用多团队拓扑（跨团队并行收敛）
+cargo run -- team-run "交付一个用户登录系统" --team-topology multi --max-parallel 4 --max-parallel-teams 2
+
 # 启用动态角色故障切换（同一角色多实例）
 cargo run -- team-run "交付一个用户登录系统 [[failover:coder]]" --enable-role-failover --max-role-attempts 2
 
@@ -95,8 +107,13 @@ cargo run -- team-run "交付一个用户登录系统" --profile-file config/tea
 - 4 个 Gate：Intake / Freeze / Release / Closure
 - Gate 规则：`unanimous` / `majority`
 - 冲突处理：`two_round` / `immediate_escalation`
+- 跨团队合并：`strict` / `fast`
+- 合并自愈：`--enable-merge-auto-rework` + `--max-merge-retries`
+- 冲突路由标记：`[[merge:code-conflict]]` / `[[merge:api-conflict]]` / `[[merge:test-conflict]]`
+- 冲突路由映射：可在 `config/team-runtime.yaml` 的 `merge_rework_routes` 自定义 team/role 路径
 - 角色管理：`--enable-role-failover` + `--max-role-attempts`（或 profile 中配置）
-- 策略可通过 `--gate-policy`、`--arbiter-policy` 或 `--profile-file` 动态切换
+- 团队管理：`--team-topology single|multi` + `--max-parallel-teams`
+- 策略可通过 `--gate-policy`、`--arbiter-policy`、`--merge-policy` 或 `--profile-file` 动态切换
 
 ## 工作流配置
 

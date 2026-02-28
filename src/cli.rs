@@ -73,6 +73,10 @@ enum Commands {
         #[arg(long, default_value_t = 3)]
         max_parallel: usize,
         #[arg(long)]
+        team_topology: Option<String>,
+        #[arg(long)]
+        max_parallel_teams: Option<usize>,
+        #[arg(long)]
         enable_role_failover: bool,
         #[arg(long)]
         max_role_attempts: Option<usize>,
@@ -82,6 +86,12 @@ enum Commands {
         gate_policy: Option<String>,
         #[arg(long)]
         arbiter_policy: Option<String>,
+        #[arg(long)]
+        merge_policy: Option<String>,
+        #[arg(long)]
+        enable_merge_auto_rework: bool,
+        #[arg(long)]
+        max_merge_retries: Option<u32>,
     },
 }
 
@@ -184,20 +194,34 @@ pub fn run() -> Result<()> {
         Commands::TeamRun {
             requirement,
             max_parallel,
+            team_topology,
+            max_parallel_teams,
             enable_role_failover,
             max_role_attempts,
             profile_file,
             gate_policy,
             arbiter_policy,
+            merge_policy,
+            enable_merge_auto_rework,
+            max_merge_retries,
         } => {
             let profile = RuntimeProfile::load(profile_file.as_deref())?
                 .with_gate_policy(gate_policy)
                 .with_arbiter_policy(arbiter_policy)
+                .with_merge_policy(merge_policy)
+                .with_merge_auto_rework(enable_merge_auto_rework)
+                .with_max_merge_retries(max_merge_retries)
+                .with_team_topology(team_topology)
+                .with_max_parallel_teams(max_parallel_teams)
                 .with_role_failover(enable_role_failover)
                 .with_max_role_attempts(max_role_attempts);
             let runtime = ProjectRuntime::new(
                 registry_from_profile(&profile)?,
                 max_parallel,
+                profile.max_parallel_teams,
+                profile.merge_auto_rework,
+                profile.max_merge_retries,
+                profile.merge_rework_routes.clone(),
                 profile.role_failover,
                 profile.max_role_attempts,
             );
