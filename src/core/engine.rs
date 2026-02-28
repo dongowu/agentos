@@ -518,8 +518,17 @@ fn evaluate_condition_atom(
     routes: &HashMap<String, MergeReworkRoute>,
     rule: &MergeReworkRule,
 ) -> bool {
+    if let Some(target) = atom.strip_prefix("risk==") {
+        let target = target.trim();
+        return max_risk_level(reports) == risk_rank(target);
+    }
+
     if let Some(target) = atom.strip_prefix("risk>=") {
         return max_risk_level(reports) >= risk_rank(target.trim());
+    }
+
+    if let Some(target) = atom.strip_prefix("risk<=") {
+        return max_risk_level(reports) <= risk_rank(target.trim());
     }
     if let Some(target) = atom.strip_prefix("retry>=") {
         if let Ok(target) = target.trim().parse::<u32>() {
@@ -1106,5 +1115,46 @@ mod tests {
             .trace
             .iter()
             .any(|line| line.contains("expr=retry>=1 && team_load>=2")));
+    }
+
+    #[test]
+    fn company_flow_supports_risk_equal_expression() {
+        let mut profile = RuntimeProfile::default();
+        profile.team_topology = "multi".to_string();
+        profile.merge_policy = "strict".to_string();
+        if let Some(rule) = profile
+            .merge_rework_rules
+            .iter_mut()
+            .find(|rule| rule.route_key == "api-conflict")
+        {
+            rule.condition_expression = Some("risk==low".to_string());
+        }
+        let plugins = registry_from_profile(&profile).expect("plugins");
+        let goal = GoalContract {
+            goal_id: "goal_test_15".to_string(),
+            objective: "ship feature [[merge:api-conflict]]".to_string(),
+            acceptance_criteria: vec!["tests pass".to_string()],
+        };
+
+        let report = run_company_flow(
+            "ship feature [[merge:api-conflict]]",
+            goal,
+            4,
+            2,
+            true,
+            2,
+            &profile.merge_rework_routes,
+            &profile.merge_rework_rules,
+            false,
+            2,
+            &plugins,
+        )
+        .expect("report");
+
+        assert_eq!(report.status, ProjectStatus::Completed);
+        assert!(report
+            .tasks
+            .iter()
+            .any(|task| task.task_id == "merge_rework_api_1"));
     }
 }

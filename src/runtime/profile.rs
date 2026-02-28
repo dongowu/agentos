@@ -236,7 +236,23 @@ fn validate_condition_expression(expression: &str) -> Result<()> {
 }
 
 fn validate_condition_atom(atom: &str) -> Result<()> {
+    if let Some(value) = atom.strip_prefix("risk==") {
+        let level = value.trim();
+        if level == "low" || level == "medium" || level == "high" {
+            return Ok(());
+        }
+        bail!("unsupported risk level '{}'", level);
+    }
+
     if let Some(value) = atom.strip_prefix("risk>=") {
+        let level = value.trim();
+        if level == "low" || level == "medium" || level == "high" {
+            return Ok(());
+        }
+        bail!("unsupported risk level '{}'", level);
+    }
+
+    if let Some(value) = atom.strip_prefix("risk<=") {
         let level = value.trim();
         if level == "low" || level == "medium" || level == "high" {
             return Ok(());
@@ -319,6 +335,13 @@ mod tests {
         let mut profile = RuntimeProfile::default();
         profile.merge_rework_rules[0].condition_expression =
             Some("risk>=medium && retry>=1 || team_load<=3".to_string());
+        profile.validate().expect("should pass");
+    }
+
+    #[test]
+    fn accepts_risk_equal_expression() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_expression = Some("risk==low".to_string());
         profile.validate().expect("should pass");
     }
 }
