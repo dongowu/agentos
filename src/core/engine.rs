@@ -472,7 +472,7 @@ fn rule_conditions_match(
         return true;
     }
 
-    if rule.condition_mode == "any" {
+    if rule.condition_mode.eq_ignore_ascii_case("any") {
         checks.into_iter().any(|passed| passed)
     } else {
         checks.into_iter().all(|passed| passed)

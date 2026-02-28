@@ -99,7 +99,9 @@ impl RuntimeProfile {
         }
 
         for rule in &self.merge_rework_rules {
-            if rule.condition_mode != "all" && rule.condition_mode != "any" {
+            if !rule.condition_mode.eq_ignore_ascii_case("all")
+                && !rule.condition_mode.eq_ignore_ascii_case("any")
+            {
                 bail!(
                     "invalid condition_mode '{}' for route_key '{}' (expected 'all' or 'any')",
                     rule.condition_mode,
@@ -214,5 +216,12 @@ mod tests {
         profile.merge_rework_rules[0].route_key = "missing-route".to_string();
         let err = profile.validate().expect_err("should fail");
         assert!(err.to_string().contains("unknown route_key"));
+    }
+
+    #[test]
+    fn accepts_uppercase_condition_mode() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_mode = "ANY".to_string();
+        profile.validate().expect("should pass");
     }
 }
