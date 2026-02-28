@@ -372,6 +372,12 @@ fn evaluate_merge_with_auto_rework(
                 )
             })
             .unwrap_or_else(|| "marker=<fallback> priority=<none> mode=<none>".to_string());
+        if selected.matched_rule.is_none() {
+            trace.push(format!(
+                "merge route fallback: no rule matched, using route '{}'",
+                route.route_name
+            ));
+        }
         trace.push(format!(
             "merge auto-rework round {} ({}) [{}] : rollback to last checkpoint and regenerate conflicted outputs",
             retry,
@@ -981,6 +987,10 @@ mod tests {
             .tasks
             .iter()
             .any(|task| task.task_id == "merge_rework_generic_1"));
+        assert!(report
+            .trace
+            .iter()
+            .any(|line| line.contains("merge route fallback: no rule matched")));
     }
 
     #[test]
