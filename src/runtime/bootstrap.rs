@@ -39,7 +39,10 @@ pub fn registry_from_profile(profile: &RuntimeProfile) -> Result<PluginRegistry>
             if command.is_empty() {
                 bail!("llm_script_command is required when llm_adapter='script'");
             }
-            Arc::new(ScriptLlmAdapter::new(command.to_string()))
+            Arc::new(ScriptLlmAdapter::new(
+                command.to_string(),
+                profile.llm_script_max_attempts,
+            ))
         }
         other => bail!("unsupported llm adapter: {}", other),
     };
@@ -72,6 +75,7 @@ mod tests {
             llm_adapter: "mock".to_string(),
             llm_model: "orchestrator-sim".to_string(),
             llm_script_command: None,
+            llm_script_max_attempts: 1,
             merge_auto_rework: false,
             max_merge_retries: 1,
             merge_rework_routes: crate::core::models::default_merge_rework_routes(),
