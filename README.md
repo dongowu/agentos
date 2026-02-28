@@ -112,6 +112,7 @@ cargo run -- team-run "交付一个用户登录系统" --profile-file config/tea
 - 冲突路由标记：`[[merge:code-conflict]]` / `[[merge:api-conflict]]` / `[[merge:test-conflict]]`
 - 冲突路由映射：可在 `config/team-runtime.yaml` 的 `merge_rework_routes` 自定义 team/role 路径
 - 路由优先级：可在 `merge_rework_rules` 配置 marker 匹配顺序（priority 越小越先匹配）
+- 规则开关：`enabled: true|false`（可临时停用某条路由规则）
 - 条件字段：`required_risk_level` / `min_retry_round` / `max_team_load`（可选）
 - 条件组合：`condition_mode: all|any`（默认 `all`）
 - 表达式条件：`condition_expression` 支持 `risk==...`、`risk>=...`、`risk<=...`、`retry==...`、`retry>=...`、`retry<=...`、`team_load==...`、`team_load<=...`、`team_load>=...`，并可用 `&&`/`||`

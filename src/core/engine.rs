@@ -427,7 +427,8 @@ fn detect_merge_rework_route(
     let matched_rule = ordered_rules
         .iter()
         .find(|rule| {
-            requirement.contains(&rule.marker)
+            rule.enabled
+                && requirement.contains(&rule.marker)
                 && rule_conditions_match(rule, reports, retry_round, routes)
         })
         .cloned();
@@ -1263,5 +1264,46 @@ mod tests {
             .tasks
             .iter()
             .any(|task| task.task_id == "merge_rework_api_1"));
+    }
+
+    #[test]
+    fn company_flow_skips_disabled_rule_and_falls_back() {
+        let mut profile = RuntimeProfile::default();
+        profile.team_topology = "multi".to_string();
+        profile.merge_policy = "strict".to_string();
+        if let Some(rule) = profile
+            .merge_rework_rules
+            .iter_mut()
+            .find(|rule| rule.route_key == "api-conflict")
+        {
+            rule.enabled = false;
+        }
+        let plugins = registry_from_profile(&profile).expect("plugins");
+        let goal = GoalContract {
+            goal_id: "goal_test_18".to_string(),
+            objective: "ship feature [[merge:api-conflict]] [[merge:conflict]]".to_string(),
+            acceptance_criteria: vec!["tests pass".to_string()],
+        };
+
+        let report = run_company_flow(
+            "ship feature [[merge:api-conflict]] [[merge:conflict]]",
+            goal,
+            4,
+            2,
+            true,
+            2,
+            &profile.merge_rework_routes,
+            &profile.merge_rework_rules,
+            false,
+            2,
+            &plugins,
+        )
+        .expect("report");
+
+        assert_eq!(report.status, ProjectStatus::Completed);
+        assert!(report
+            .tasks
+            .iter()
+            .any(|task| task.task_id == "merge_rework_generic_1"));
     }
 }
