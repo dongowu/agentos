@@ -57,6 +57,35 @@ assert api_check.get('matched') is False, 'api-conflict rule should not match wh
 assert api_check.get('reason') == 'disabled', 'api-conflict rule should be marked disabled'
 PY
 
+echo "[stage1] 2c/3 validate profile guardrails on duplicate priority"
+python3 - <<'PY'
+from pathlib import Path
+
+src = Path('config/team-runtime.yaml').read_text()
+patched = src.replace(
+    'route_key: api-conflict\n    priority: 20',
+    'route_key: api-conflict\n    priority: 10',
+    1,
+)
+Path('/tmp/stage1_invalid_priority_profile.yaml').write_text(patched)
+PY
+
+set +e
+invalid_output=$(cargo run -- team-run "demo [[merge:api-conflict]]" --explain-routing --profile-file /tmp/stage1_invalid_priority_profile.yaml 2>&1)
+invalid_status=$?
+set -e
+
+if [ "$invalid_status" -eq 0 ]; then
+  echo "[stage1] expected invalid profile command to fail, but it succeeded"
+  exit 1
+fi
+
+if [[ "$invalid_output" != *"duplicate priority"* ]]; then
+  echo "[stage1] expected duplicate priority error message, got:"
+  echo "$invalid_output"
+  exit 1
+fi
+
 echo "[stage1] 3/3 execute multi-team flow"
 cargo run -- team-run "demo [[merge:api-conflict]]" --team-topology multi --merge-policy strict --enable-merge-auto-rework --max-merge-retries 2 --max-parallel 4 --max-parallel-teams 2 --profile-file config/team-runtime.yaml > /tmp/stage1_run.json
 

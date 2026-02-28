@@ -34,6 +34,7 @@ Any item marked failed blocks merging feature branches into `main`.
 - [ ] Trace includes fallback event when no rule matches.
 - [ ] Stage-1 script asserts merge rework evidence (`merge_rework_api_1`) and auto-rework trace line.
 - [ ] Stage-1 script asserts fallback routing (`api-conflict` disabled => `generic` selected) with disabled reason.
+- [ ] Stage-1 script asserts invalid profile rejection (duplicate priority) with explicit error message.
 
 ## E. Branch Policy
 
