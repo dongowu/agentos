@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::core::models::{
@@ -93,15 +93,43 @@ impl Default for RuntimeProfile {
 }
 
 impl RuntimeProfile {
+    fn validate(&self) -> Result<()> {
+        if !self.merge_rework_routes.contains_key("generic") {
+            bail!("merge_rework_routes must define a 'generic' route");
+        }
+
+        for rule in &self.merge_rework_rules {
+            if rule.condition_mode != "all" && rule.condition_mode != "any" {
+                bail!(
+                    "invalid condition_mode '{}' for route_key '{}' (expected 'all' or 'any')",
+                    rule.condition_mode,
+                    rule.route_key
+                );
+            }
+
+            if !self.merge_rework_routes.contains_key(&rule.route_key) {
+                bail!(
+                    "merge_rework_rules references unknown route_key '{}'",
+                    rule.route_key
+                );
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn load(path: Option<&Path>) -> Result<Self> {
         if let Some(path) = path {
             let raw = fs::read_to_string(path)
                 .with_context(|| format!("failed to read runtime profile {}", path.display()))?;
             let parsed = serde_yaml::from_str::<RuntimeProfile>(&raw)
                 .with_context(|| format!("failed to parse runtime profile {}", path.display()))?;
+            parsed.validate()?;
             return Ok(parsed);
         }
-        Ok(Self::default())
+        let profile = Self::default();
+        profile.validate()?;
+        Ok(profile)
     }
 
     pub fn with_gate_policy(mut self, policy: Option<String>) -> Self {
@@ -165,5 +193,26 @@ impl RuntimeProfile {
             self.max_parallel_teams = max_parallel_teams.max(1);
         }
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RuntimeProfile;
+
+    #[test]
+    fn rejects_unknown_condition_mode() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_mode = "xor".to_string();
+        let err = profile.validate().expect_err("should fail");
+        assert!(err.to_string().contains("invalid condition_mode"));
+    }
+
+    #[test]
+    fn rejects_rule_with_unknown_route_key() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].route_key = "missing-route".to_string();
+        let err = profile.validate().expect_err("should fail");
+        assert!(err.to_string().contains("unknown route_key"));
     }
 }
