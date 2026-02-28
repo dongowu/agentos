@@ -131,6 +131,7 @@ cargo run -- team-run "交付一个用户登录系统" --profile-file config/tea
 ## 内部验收
 
 - Stage 1 内部验收清单：`docs/testing/internal-acceptance-checklist.md`
+- Stage 1 完成报告：`docs/testing/stage1-completion-report.md`
 - 一键执行 Stage 1 验收：`./scripts/stage1_acceptance.sh`
 
 - 默认内置工作流来自 `src/workflow_config.rs`
