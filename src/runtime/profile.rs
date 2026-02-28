@@ -386,7 +386,23 @@ fn validate_condition_atom(atom: &str) -> Result<()> {
         return Ok(());
     }
 
+    if let Some(value) = atom.strip_prefix("retry>") {
+        value
+            .trim()
+            .parse::<u32>()
+            .with_context(|| format!("invalid retry bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
     if let Some(value) = atom.strip_prefix("retry<=") {
+        value
+            .trim()
+            .parse::<u32>()
+            .with_context(|| format!("invalid retry bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
+    if let Some(value) = atom.strip_prefix("retry<") {
         value
             .trim()
             .parse::<u32>()
@@ -410,7 +426,23 @@ fn validate_condition_atom(atom: &str) -> Result<()> {
         return Ok(());
     }
 
+    if let Some(value) = atom.strip_prefix("team_load<") {
+        value
+            .trim()
+            .parse::<usize>()
+            .with_context(|| format!("invalid team_load bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
     if let Some(value) = atom.strip_prefix("team_load>=") {
+        value
+            .trim()
+            .parse::<usize>()
+            .with_context(|| format!("invalid team_load bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
+    if let Some(value) = atom.strip_prefix("team_load>") {
         value
             .trim()
             .parse::<usize>()
@@ -529,6 +561,14 @@ mod tests {
         let mut profile = RuntimeProfile::default();
         profile.merge_rework_rules[0].condition_expression =
             Some("(risk==low || retry==2) && !false".to_string());
+        profile.validate().expect("should pass");
+    }
+
+    #[test]
+    fn accepts_strict_inequality_expression() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_expression =
+            Some("retry>0 && retry<3 && team_load>1 && team_load<5".to_string());
         profile.validate().expect("should pass");
     }
 
