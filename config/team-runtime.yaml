@@ -35,6 +35,9 @@ merge_rework_rules:
   - marker: "[[merge:api-conflict]]"
     route_key: api-conflict
     priority: 20
+    required_risk_level: low
+    min_retry_round: 1
+    max_team_load: 5
   - marker: "[[merge:test-conflict]]"
     route_key: test-conflict
     priority: 30

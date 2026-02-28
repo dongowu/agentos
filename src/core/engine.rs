@@ -347,9 +347,15 @@ fn evaluate_merge_with_auto_rework(
         return outcome;
     }
 
-    let route = detect_merge_rework_route(requirement, merge_rework_routes, merge_rework_rules);
     let max_retries = max_merge_retries.max(1);
     for retry in 1..=max_retries {
+        let route = detect_merge_rework_route(
+            requirement,
+            reports,
+            retry,
+            merge_rework_routes,
+            merge_rework_rules,
+        );
         trace.push(format!(
             "merge auto-rework round {} ({}) : rollback to last checkpoint and regenerate conflicted outputs",
             retry,
@@ -381,6 +387,8 @@ fn evaluate_merge_with_auto_rework(
 
 fn detect_merge_rework_route(
     requirement: &str,
+    reports: &[TaskReport],
+    retry_round: u32,
     routes: &HashMap<String, MergeReworkRoute>,
     rules: &[MergeReworkRule],
 ) -> MergeReworkRoute {
@@ -389,7 +397,27 @@ fn detect_merge_rework_route(
 
     let key = ordered_rules
         .iter()
-        .find(|rule| requirement.contains(&rule.marker))
+        .find(|rule| {
+            requirement.contains(&rule.marker)
+                && rule
+                    .min_retry_round
+                    .map(|min_retry| retry_round >= min_retry)
+                    .unwrap_or(true)
+                && rule
+                    .required_risk_level
+                    .as_ref()
+                    .map(|required| max_risk_level(reports) >= risk_rank(required))
+                    .unwrap_or(true)
+                && rule
+                    .max_team_load
+                    .map(|limit| {
+                        routes
+                            .get(&rule.route_key)
+                            .map(|route| team_load(reports, &route.team_id) <= limit)
+                            .unwrap_or(false)
+                    })
+                    .unwrap_or(true)
+        })
         .map(|rule| rule.route_key.as_str())
         .unwrap_or("generic");
 
@@ -404,6 +432,30 @@ fn detect_merge_rework_route(
             role: "supervisor@supervisor.primary".to_string(),
             actor_summary: "supervisor".to_string(),
         })
+}
+
+fn team_load(reports: &[TaskReport], team_id: &str) -> usize {
+    reports
+        .iter()
+        .filter(|report| report.team_id == team_id)
+        .count()
+}
+
+fn max_risk_level(reports: &[TaskReport]) -> u8 {
+    reports
+        .iter()
+        .map(|report| risk_rank(&report.risk_level))
+        .max()
+        .unwrap_or(0)
+}
+
+fn risk_rank(risk_level: &str) -> u8 {
+    match risk_level {
+        "high" => 3,
+        "medium" => 2,
+        "low" => 1,
+        _ => 0,
+    }
 }
 
 #[cfg(test)]
@@ -740,6 +792,88 @@ mod tests {
 
         let report = run_company_flow(
             "ship feature [[merge:api-conflict]] [[merge:conflict]]",
+            goal,
+            4,
+            2,
+            true,
+            2,
+            &profile.merge_rework_routes,
+            &profile.merge_rework_rules,
+            false,
+            2,
+            &plugins,
+        )
+        .expect("report");
+
+        assert_eq!(report.status, ProjectStatus::Completed);
+        assert!(report
+            .tasks
+            .iter()
+            .any(|task| task.task_id == "merge_rework_generic_1"));
+    }
+
+    #[test]
+    fn company_flow_respects_min_retry_round_condition() {
+        let mut profile = RuntimeProfile::default();
+        profile.team_topology = "multi".to_string();
+        profile.merge_policy = "strict".to_string();
+        if let Some(rule) = profile
+            .merge_rework_rules
+            .iter_mut()
+            .find(|rule| rule.route_key == "api-conflict")
+        {
+            rule.min_retry_round = Some(2);
+        }
+        let plugins = registry_from_profile(&profile).expect("plugins");
+        let goal = GoalContract {
+            goal_id: "goal_test_11".to_string(),
+            objective: "ship feature [[merge:api-conflict]]".to_string(),
+            acceptance_criteria: vec!["tests pass".to_string()],
+        };
+
+        let report = run_company_flow(
+            "ship feature [[merge:api-conflict]]",
+            goal,
+            4,
+            2,
+            true,
+            2,
+            &profile.merge_rework_routes,
+            &profile.merge_rework_rules,
+            false,
+            2,
+            &plugins,
+        )
+        .expect("report");
+
+        assert_eq!(report.status, ProjectStatus::Completed);
+        assert!(report
+            .tasks
+            .iter()
+            .any(|task| task.task_id == "merge_rework_generic_1"));
+    }
+
+    #[test]
+    fn company_flow_respects_team_load_condition() {
+        let mut profile = RuntimeProfile::default();
+        profile.team_topology = "multi".to_string();
+        profile.merge_policy = "strict".to_string();
+        if let Some(rule) = profile
+            .merge_rework_rules
+            .iter_mut()
+            .find(|rule| rule.route_key == "api-conflict")
+        {
+            rule.max_team_load = Some(0);
+        }
+        let plugins = registry_from_profile(&profile).expect("plugins");
+        let goal = GoalContract {
+            goal_id: "goal_test_12".to_string(),
+            objective: "ship feature [[merge:api-conflict]]".to_string(),
+            acceptance_criteria: vec!["tests pass".to_string()],
+        };
+
+        let report = run_company_flow(
+            "ship feature [[merge:api-conflict]]",
             goal,
             4,
             2,
