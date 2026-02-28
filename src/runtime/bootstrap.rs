@@ -53,6 +53,7 @@ mod tests {
             merge_auto_rework: false,
             max_merge_retries: 1,
             merge_rework_routes: crate::core::models::default_merge_rework_routes(),
+            merge_rework_rules: crate::core::models::default_merge_rework_rules(),
             role_failover: false,
             max_role_attempts: 2,
             role_instances: Default::default(),

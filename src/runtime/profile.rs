@@ -5,7 +5,9 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::core::models::{default_merge_rework_routes, MergeReworkRoute};
+use crate::core::models::{
+    default_merge_rework_routes, default_merge_rework_rules, MergeReworkRoute, MergeReworkRule,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeProfile {
@@ -21,6 +23,8 @@ pub struct RuntimeProfile {
     pub max_merge_retries: u32,
     #[serde(default = "default_routes")]
     pub merge_rework_routes: HashMap<String, MergeReworkRoute>,
+    #[serde(default = "default_rules")]
+    pub merge_rework_rules: Vec<MergeReworkRule>,
     #[serde(default)]
     pub role_failover: bool,
     #[serde(default = "default_max_role_attempts")]
@@ -53,6 +57,10 @@ fn default_routes() -> HashMap<String, MergeReworkRoute> {
     default_merge_rework_routes()
 }
 
+fn default_rules() -> Vec<MergeReworkRule> {
+    default_merge_rework_rules()
+}
+
 fn default_max_role_attempts() -> usize {
     2
 }
@@ -74,6 +82,7 @@ impl Default for RuntimeProfile {
             merge_auto_rework: false,
             max_merge_retries: default_max_merge_retries(),
             merge_rework_routes: default_routes(),
+            merge_rework_rules: default_rules(),
             role_failover: false,
             max_role_attempts: default_max_role_attempts(),
             role_instances: HashMap::new(),

@@ -78,6 +78,13 @@ pub struct MergeReworkRoute {
     pub actor_summary: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeReworkRule {
+    pub marker: String,
+    pub route_key: String,
+    pub priority: u32,
+}
+
 pub fn default_merge_rework_routes() -> HashMap<String, MergeReworkRoute> {
     HashMap::from([
         (
@@ -121,6 +128,31 @@ pub fn default_merge_rework_routes() -> HashMap<String, MergeReworkRoute> {
             },
         ),
     ])
+}
+
+pub fn default_merge_rework_rules() -> Vec<MergeReworkRule> {
+    vec![
+        MergeReworkRule {
+            marker: "[[merge:code-conflict]]".to_string(),
+            route_key: "code-conflict".to_string(),
+            priority: 10,
+        },
+        MergeReworkRule {
+            marker: "[[merge:api-conflict]]".to_string(),
+            route_key: "api-conflict".to_string(),
+            priority: 20,
+        },
+        MergeReworkRule {
+            marker: "[[merge:test-conflict]]".to_string(),
+            route_key: "test-conflict".to_string(),
+            priority: 30,
+        },
+        MergeReworkRule {
+            marker: "[[merge:conflict]]".to_string(),
+            route_key: "generic".to_string(),
+            priority: 100,
+        },
+    ]
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

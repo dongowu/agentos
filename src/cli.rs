@@ -222,6 +222,7 @@ pub fn run() -> Result<()> {
                 profile.merge_auto_rework,
                 profile.max_merge_retries,
                 profile.merge_rework_routes.clone(),
+                profile.merge_rework_rules.clone(),
                 profile.role_failover,
                 profile.max_role_attempts,
             );

@@ -28,6 +28,19 @@ merge_rework_routes:
     team_id: qa_team
     role: tester@tester.primary
     actor_summary: qa lead
+merge_rework_rules:
+  - marker: "[[merge:code-conflict]]"
+    route_key: code-conflict
+    priority: 10
+  - marker: "[[merge:api-conflict]]"
+    route_key: api-conflict
+    priority: 20
+  - marker: "[[merge:test-conflict]]"
+    route_key: test-conflict
+    priority: 30
+  - marker: "[[merge:conflict]]"
+    route_key: generic
+    priority: 100
 role_failover: false
 max_role_attempts: 2
 team_topology: single

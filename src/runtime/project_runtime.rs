@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::core::engine::run_company_flow;
-use crate::core::models::{GoalContract, MergeReworkRoute, ProjectReport};
+use crate::core::models::{GoalContract, MergeReworkRoute, MergeReworkRule, ProjectReport};
 use crate::plugins::PluginRegistry;
 
 pub struct ProjectRuntime {
@@ -13,6 +13,7 @@ pub struct ProjectRuntime {
     merge_auto_rework: bool,
     max_merge_retries: u32,
     merge_rework_routes: HashMap<String, MergeReworkRoute>,
+    merge_rework_rules: Vec<MergeReworkRule>,
     role_failover: bool,
     max_role_attempts: usize,
 }
@@ -25,6 +26,7 @@ impl ProjectRuntime {
         merge_auto_rework: bool,
         max_merge_retries: u32,
         merge_rework_routes: HashMap<String, MergeReworkRoute>,
+        merge_rework_rules: Vec<MergeReworkRule>,
         role_failover: bool,
         max_role_attempts: usize,
     ) -> Self {
@@ -35,6 +37,7 @@ impl ProjectRuntime {
             merge_auto_rework,
             max_merge_retries,
             merge_rework_routes,
+            merge_rework_rules,
             role_failover,
             max_role_attempts,
         }
@@ -58,6 +61,7 @@ impl ProjectRuntime {
             self.merge_auto_rework,
             self.max_merge_retries,
             &self.merge_rework_routes,
+            &self.merge_rework_rules,
             self.role_failover,
             self.max_role_attempts,
             &self.plugins,
