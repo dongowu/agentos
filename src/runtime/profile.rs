@@ -284,6 +284,14 @@ fn validate_condition_atom(atom: &str) -> Result<()> {
         return Ok(());
     }
 
+    if let Some(value) = atom.strip_prefix("retry==") {
+        value
+            .trim()
+            .parse::<u32>()
+            .with_context(|| format!("invalid retry bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
     if let Some(value) = atom.strip_prefix("team_load<=") {
         value
             .trim()
@@ -293,6 +301,14 @@ fn validate_condition_atom(atom: &str) -> Result<()> {
     }
 
     if let Some(value) = atom.strip_prefix("team_load>=") {
+        value
+            .trim()
+            .parse::<usize>()
+            .with_context(|| format!("invalid team_load bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
+    if let Some(value) = atom.strip_prefix("team_load==") {
         value
             .trim()
             .parse::<usize>()
@@ -351,6 +367,14 @@ mod tests {
         let mut profile = RuntimeProfile::default();
         profile.merge_rework_rules[0].condition_expression =
             Some("risk>=medium && retry>=1 || team_load<=3".to_string());
+        profile.validate().expect("should pass");
+    }
+
+    #[test]
+    fn accepts_retry_equal_and_team_load_equal_expression() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_expression =
+            Some("retry==1 && team_load==2".to_string());
         profile.validate().expect("should pass");
     }
 
