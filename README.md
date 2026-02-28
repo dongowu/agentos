@@ -92,6 +92,9 @@ cargo run -- team-run "交付一个用户登录系统 [[merge:conflict]]" --team
 # 按冲突类型路由自动修复子流程
 cargo run -- team-run "交付一个用户登录系统 [[merge:api-conflict]]" --team-topology multi --merge-policy strict --enable-merge-auto-rework
 
+# 仅预览路由命中（不执行团队流程）
+cargo run -- team-run "交付一个用户登录系统 [[merge:api-conflict]]" --explain-routing --explain-retry-round 1
+
 # 启用多团队拓扑（跨团队并行收敛）
 cargo run -- team-run "交付一个用户登录系统" --team-topology multi --max-parallel 4 --max-parallel-teams 2
 

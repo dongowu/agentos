@@ -70,6 +70,24 @@ pub struct MergeOutcome {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeRuleCheck {
+    pub route_key: String,
+    pub marker: String,
+    pub priority: u32,
+    pub enabled: bool,
+    pub matched: bool,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeRouteExplanation {
+    pub retry_round: u32,
+    pub selected_route: MergeReworkRoute,
+    pub matched_rule: Option<MergeReworkRule>,
+    pub checks: Vec<MergeRuleCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeReworkRoute {
     pub route_name: String,
     pub task_suffix: String,

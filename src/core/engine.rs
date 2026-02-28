@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 
 use crate::core::models::{
     GateId, GateOutcome, GoalContract, MergeOutcome, MergeReworkRoute, MergeReworkRule,
-    ProjectReport, ProjectStatus, TaskNode, TaskReport,
+    MergeRouteExplanation, MergeRuleCheck, ProjectReport, ProjectStatus, TaskNode, TaskReport,
 };
 use crate::core::scheduler::next_runnable;
 use crate::core::trace::TraceLog;
@@ -414,6 +414,39 @@ struct SelectedMergeRoute {
     matched_rule: Option<MergeReworkRule>,
 }
 
+pub fn explain_merge_route_decision(
+    requirement: &str,
+    reports: &[TaskReport],
+    retry_round: u32,
+    routes: &HashMap<String, MergeReworkRoute>,
+    rules: &[MergeReworkRule],
+) -> MergeRouteExplanation {
+    let mut ordered_rules = rules.to_vec();
+    ordered_rules.sort_by_key(|rule| rule.priority);
+
+    let mut checks = Vec::new();
+    for rule in &ordered_rules {
+        let (matched, reason) =
+            evaluate_rule_for_explain(rule, requirement, reports, retry_round, routes);
+        checks.push(MergeRuleCheck {
+            route_key: rule.route_key.clone(),
+            marker: rule.marker.clone(),
+            priority: rule.priority,
+            enabled: rule.enabled,
+            matched,
+            reason,
+        });
+    }
+
+    let selected = detect_merge_rework_route(requirement, reports, retry_round, routes, rules);
+    MergeRouteExplanation {
+        retry_round,
+        selected_route: selected.route,
+        matched_rule: selected.matched_rule,
+        checks,
+    }
+}
+
 fn detect_merge_rework_route(
     requirement: &str,
     reports: &[TaskReport],
@@ -454,6 +487,25 @@ fn detect_merge_rework_route(
         route,
         matched_rule,
     }
+}
+
+fn evaluate_rule_for_explain(
+    rule: &MergeReworkRule,
+    requirement: &str,
+    reports: &[TaskReport],
+    retry_round: u32,
+    routes: &HashMap<String, MergeReworkRoute>,
+) -> (bool, String) {
+    if !rule.enabled {
+        return (false, "disabled".to_string());
+    }
+    if !requirement.contains(&rule.marker) {
+        return (false, "marker not present".to_string());
+    }
+    if !rule_conditions_match(rule, reports, retry_round, routes) {
+        return (false, "conditions not satisfied".to_string());
+    }
+    (true, "matched".to_string())
 }
 
 fn rule_conditions_match(

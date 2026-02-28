@@ -92,6 +92,10 @@ enum Commands {
         enable_merge_auto_rework: bool,
         #[arg(long)]
         max_merge_retries: Option<u32>,
+        #[arg(long)]
+        explain_routing: bool,
+        #[arg(long, default_value_t = 1)]
+        explain_retry_round: u32,
     },
 }
 
@@ -204,6 +208,8 @@ pub fn run() -> Result<()> {
             merge_policy,
             enable_merge_auto_rework,
             max_merge_retries,
+            explain_routing,
+            explain_retry_round,
         } => {
             let profile = RuntimeProfile::load(profile_file.as_deref())?
                 .with_gate_policy(gate_policy)
@@ -226,6 +232,11 @@ pub fn run() -> Result<()> {
                 profile.role_failover,
                 profile.max_role_attempts,
             );
+            if explain_routing {
+                let explanation = runtime.explain_routing(&requirement, explain_retry_round);
+                println!("{}", serde_json::to_string_pretty(&explanation)?);
+                return Ok(());
+            }
             let report = runtime.team_run(&requirement)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
