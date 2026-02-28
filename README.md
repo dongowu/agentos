@@ -120,7 +120,7 @@ cargo run -- team-run "交付一个用户登录系统" --profile-file config/tea
 - 规则开关：`enabled: true|false`（可临时停用某条路由规则）
 - 条件字段：`required_risk_level` / `min_retry_round` / `max_team_load`（可选）
 - 条件组合：`condition_mode: all|any`（默认 `all`）
-- 表达式条件：`condition_expression` 支持 `risk==...`、`risk>=...`、`risk<=...`、`retry==...`、`retry>=...`、`retry<=...`、`team_load==...`、`team_load<=...`、`team_load>=...`，并可用 `&&`/`||`
+- 表达式条件：`condition_expression` 支持 `risk==...`、`risk>=...`、`risk<=...`、`retry==...`、`retry>=...`、`retry<=...`、`team_load==...`、`team_load<=...`、`team_load>=...`，并可用 `&&`/`||`/`!`
 - 角色管理：`--enable-role-failover` + `--max-role-attempts`（或 profile 中配置）
 - 团队管理：`--team-topology single|multi` + `--max-parallel-teams`
 - 策略可通过 `--gate-policy`、`--arbiter-policy`、`--merge-policy` 或 `--profile-file` 动态切换

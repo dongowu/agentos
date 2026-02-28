@@ -256,6 +256,13 @@ fn validate_condition_expression(expression: &str) -> Result<()> {
 }
 
 fn validate_condition_atom(atom: &str) -> Result<()> {
+    if let Some(inner) = atom.strip_prefix('!') {
+        if inner.trim().is_empty() {
+            bail!("unsupported condition atom '{}'", atom);
+        }
+        return validate_condition_atom(inner.trim());
+    }
+
     if let Some(value) = atom.strip_prefix("risk==") {
         return validate_risk_level(value.trim());
     }
@@ -397,6 +404,13 @@ mod tests {
     fn accepts_case_insensitive_required_risk_level() {
         let mut profile = RuntimeProfile::default();
         profile.merge_rework_rules[0].required_risk_level = Some("HIGH".to_string());
+        profile.validate().expect("should pass");
+    }
+
+    #[test]
+    fn accepts_negated_expression_atom() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_expression = Some("!risk==high".to_string());
         profile.validate().expect("should pass");
     }
 }
