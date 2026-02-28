@@ -19,6 +19,7 @@ path = Path('/tmp/stage1_explain.json')
 data = json.loads(path.read_text())
 
 assert data.get('selected_route', {}).get('route_name') == 'api-conflict', 'selected route must be api-conflict'
+assert data.get('matched_rule', {}).get('route_key') == 'api-conflict', 'matched_rule route_key must be api-conflict'
 assert isinstance(data.get('checks'), list) and data['checks'], 'checks must be a non-empty list'
 assert any(item.get('matched') for item in data['checks']), 'at least one rule should match'
 assert 'team_loads' in data and isinstance(data['team_loads'], dict), 'team_loads must be present'
@@ -41,6 +42,8 @@ assert isinstance(data.get('gates'), list) and len(data['gates']) == 4, 'must ha
 assert all(g.get('approved') for g in data['gates']), 'all gates must be approved'
 assert isinstance(data.get('trace'), list) and data['trace'], 'trace must be non-empty'
 assert isinstance(data.get('tasks'), list) and data['tasks'], 'tasks must be non-empty'
+assert any(task.get('task_id') == 'merge_rework_api_1' for task in data['tasks']), 'must include merge_rework_api_1 task evidence'
+assert any('merge auto-rework round 1' in line for line in data['trace']), 'trace must include merge auto-rework round'
 PY
 
 echo "[stage1] PASS"
