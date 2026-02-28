@@ -1,0 +1,85 @@
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
+
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeProfile {
+    #[serde(default = "default_gate_policy")]
+    pub gate_policy: String,
+    #[serde(default = "default_arbiter_policy")]
+    pub arbiter_policy: String,
+    #[serde(default)]
+    pub role_failover: bool,
+    #[serde(default = "default_max_role_attempts")]
+    pub max_role_attempts: usize,
+    #[serde(default)]
+    pub role_instances: HashMap<String, Vec<String>>,
+}
+
+fn default_gate_policy() -> String {
+    "unanimous".to_string()
+}
+
+fn default_arbiter_policy() -> String {
+    "two_round".to_string()
+}
+
+fn default_max_role_attempts() -> usize {
+    2
+}
+
+impl Default for RuntimeProfile {
+    fn default() -> Self {
+        Self {
+            gate_policy: default_gate_policy(),
+            arbiter_policy: default_arbiter_policy(),
+            role_failover: false,
+            max_role_attempts: default_max_role_attempts(),
+            role_instances: HashMap::new(),
+        }
+    }
+}
+
+impl RuntimeProfile {
+    pub fn load(path: Option<&Path>) -> Result<Self> {
+        if let Some(path) = path {
+            let raw = fs::read_to_string(path)
+                .with_context(|| format!("failed to read runtime profile {}", path.display()))?;
+            let parsed = serde_yaml::from_str::<RuntimeProfile>(&raw)
+                .with_context(|| format!("failed to parse runtime profile {}", path.display()))?;
+            return Ok(parsed);
+        }
+        Ok(Self::default())
+    }
+
+    pub fn with_gate_policy(mut self, policy: Option<String>) -> Self {
+        if let Some(policy) = policy {
+            self.gate_policy = policy;
+        }
+        self
+    }
+
+    pub fn with_arbiter_policy(mut self, policy: Option<String>) -> Self {
+        if let Some(policy) = policy {
+            self.arbiter_policy = policy;
+        }
+        self
+    }
+
+    pub fn with_role_failover(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.role_failover = true;
+        }
+        self
+    }
+
+    pub fn with_max_role_attempts(mut self, attempts: Option<usize>) -> Self {
+        if let Some(attempts) = attempts {
+            self.max_role_attempts = attempts.max(1);
+        }
+        self
+    }
+}

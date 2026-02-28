@@ -6,6 +6,9 @@ use clap::{Parser, Subcommand};
 use crate::gitops::rollback_to_checkpoint;
 use crate::guard::ExecutionGuard;
 use crate::jobs::JobService;
+use crate::runtime::bootstrap::registry_from_profile;
+use crate::runtime::profile::RuntimeProfile;
+use crate::runtime::project_runtime::ProjectRuntime;
 
 #[derive(Debug, Parser)]
 #[command(name = "orch-rs", version, about = "Rust AI Orchestrator CLI")]
@@ -64,26 +67,45 @@ enum Commands {
     Rollback { workdir: PathBuf, commit: String },
     /// Validate a shell command against hard guardrails
     GuardShell { command: String },
+    /// Run enterprise-style agent team flow
+    TeamRun {
+        requirement: String,
+        #[arg(long, default_value_t = 3)]
+        max_parallel: usize,
+        #[arg(long)]
+        enable_role_failover: bool,
+        #[arg(long)]
+        max_role_attempts: Option<usize>,
+        #[arg(long)]
+        profile_file: Option<PathBuf>,
+        #[arg(long)]
+        gate_policy: Option<String>,
+        #[arg(long)]
+        arbiter_policy: Option<String>,
+    },
 }
 
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
-    let service =
-        JobService::new_with_workflow_file(&cli.db, &cli.data_dir, cli.workflow_file.as_deref())?;
+    let build_service =
+        || JobService::new_with_workflow_file(&cli.db, &cli.data_dir, cli.workflow_file.as_deref());
 
     match cli.command {
         Commands::Submit {
             requirement,
             workflow,
         } => {
+            let service = build_service()?;
             let job_id = service.submit(&requirement, &workflow)?;
             println!("{job_id}");
         }
         Commands::Work { limit } => {
+            let service = build_service()?;
             let processed = service.process_queued(limit)?;
             println!("processed={processed}");
         }
         Commands::JobStatus { job_id } => {
+            let service = build_service()?;
             let status = service.get_status(&job_id)?;
             if let Some(payload) = status {
                 println!("{}", serde_json::to_string_pretty(&payload)?);
@@ -92,6 +114,7 @@ pub fn run() -> Result<()> {
             }
         }
         Commands::Result { job_id } => {
+            let service = build_service()?;
             let result = service.get_result(&job_id)?;
             if let Some(payload) = result {
                 println!("{}", serde_json::to_string_pretty(&payload)?);
@@ -100,6 +123,7 @@ pub fn run() -> Result<()> {
             }
         }
         Commands::Resume { job_id } => {
+            let service = build_service()?;
             service.resume_job(&job_id)?;
             let result = service.get_result(&job_id)?;
             if let Some(payload) = result {
@@ -109,10 +133,12 @@ pub fn run() -> Result<()> {
             }
         }
         Commands::Trace { pipeline_id } => {
+            let service = build_service()?;
             let trace = service.trace_pipeline(&pipeline_id)?;
             println!("{}", serde_json::to_string_pretty(&trace)?);
         }
         Commands::Pending { pipeline_id } => {
+            let service = build_service()?;
             let pending = service.list_pending_decisions(pipeline_id.as_deref())?;
             if pending.is_empty() {
                 println!("No pending decisions.");
@@ -121,6 +147,7 @@ pub fn run() -> Result<()> {
             }
         }
         Commands::Approve { decision_id } => {
+            let service = build_service()?;
             service.approve_decision(&decision_id)?;
             println!("approved={decision_id}");
         }
@@ -128,6 +155,7 @@ pub fn run() -> Result<()> {
             decision_id,
             reason,
         } => {
+            let service = build_service()?;
             service.reject_decision(&decision_id, reason.as_deref())?;
             println!("rejected={decision_id}");
         }
@@ -135,6 +163,7 @@ pub fn run() -> Result<()> {
             requirement,
             workflow,
         } => {
+            let service = build_service()?;
             let job_id = service.submit(&requirement, &workflow)?;
             service.run_job(&job_id)?;
             let result = service.get_result(&job_id)?;
@@ -151,6 +180,29 @@ pub fn run() -> Result<()> {
         Commands::GuardShell { command } => {
             let decision = ExecutionGuard::default().validate_shell(&command);
             println!("{}", serde_json::to_string_pretty(&decision)?);
+        }
+        Commands::TeamRun {
+            requirement,
+            max_parallel,
+            enable_role_failover,
+            max_role_attempts,
+            profile_file,
+            gate_policy,
+            arbiter_policy,
+        } => {
+            let profile = RuntimeProfile::load(profile_file.as_deref())?
+                .with_gate_policy(gate_policy)
+                .with_arbiter_policy(arbiter_policy)
+                .with_role_failover(enable_role_failover)
+                .with_max_role_attempts(max_role_attempts);
+            let runtime = ProjectRuntime::new(
+                registry_from_profile(&profile)?,
+                max_parallel,
+                profile.role_failover,
+                profile.max_role_attempts,
+            );
+            let report = runtime.team_run(&requirement)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
         }
     }
 
