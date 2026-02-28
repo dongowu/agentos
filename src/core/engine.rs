@@ -349,17 +349,29 @@ fn evaluate_merge_with_auto_rework(
 
     let max_retries = max_merge_retries.max(1);
     for retry in 1..=max_retries {
-        let route = detect_merge_rework_route(
+        let selected = detect_merge_rework_route(
             requirement,
             reports,
             retry,
             merge_rework_routes,
             merge_rework_rules,
         );
+        let route = &selected.route;
+        let rule_hint = selected
+            .matched_rule
+            .as_ref()
+            .map(|rule| {
+                format!(
+                    "marker={} priority={} mode={}",
+                    rule.marker, rule.priority, rule.condition_mode
+                )
+            })
+            .unwrap_or_else(|| "marker=<fallback> priority=<none> mode=<none>".to_string());
         trace.push(format!(
-            "merge auto-rework round {} ({}) : rollback to last checkpoint and regenerate conflicted outputs",
+            "merge auto-rework round {} ({}) [{}] : rollback to last checkpoint and regenerate conflicted outputs",
             retry,
-            route.route_name
+            route.route_name,
+            rule_hint
         ));
         reports.push(TaskReport {
             task_id: format!("merge_rework_{}_{}", route.task_suffix, retry),
@@ -385,26 +397,36 @@ fn evaluate_merge_with_auto_rework(
     outcome
 }
 
+#[derive(Debug, Clone)]
+struct SelectedMergeRoute {
+    route: MergeReworkRoute,
+    matched_rule: Option<MergeReworkRule>,
+}
+
 fn detect_merge_rework_route(
     requirement: &str,
     reports: &[TaskReport],
     retry_round: u32,
     routes: &HashMap<String, MergeReworkRoute>,
     rules: &[MergeReworkRule],
-) -> MergeReworkRoute {
+) -> SelectedMergeRoute {
     let mut ordered_rules = rules.to_vec();
     ordered_rules.sort_by_key(|rule| rule.priority);
 
-    let key = ordered_rules
+    let matched_rule = ordered_rules
         .iter()
         .find(|rule| {
             requirement.contains(&rule.marker)
                 && rule_conditions_match(rule, reports, retry_round, routes)
         })
+        .cloned();
+
+    let key = matched_rule
+        .as_ref()
         .map(|rule| rule.route_key.as_str())
         .unwrap_or("generic");
 
-    routes
+    let route = routes
         .get(key)
         .cloned()
         .or_else(|| routes.get("generic").cloned())
@@ -414,7 +436,12 @@ fn detect_merge_rework_route(
             team_id: "program_board".to_string(),
             role: "supervisor@supervisor.primary".to_string(),
             actor_summary: "supervisor".to_string(),
-        })
+        });
+
+    SelectedMergeRoute {
+        route,
+        matched_rule,
+    }
 }
 
 fn rule_conditions_match(
