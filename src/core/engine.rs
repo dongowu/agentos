@@ -668,9 +668,21 @@ fn evaluate_condition_atom(
         }
         return false;
     }
+    if let Some(target) = atom.strip_prefix("retry>") {
+        if let Ok(target) = target.trim().parse::<u32>() {
+            return retry_round > target;
+        }
+        return false;
+    }
     if let Some(target) = atom.strip_prefix("retry<=") {
         if let Ok(target) = target.trim().parse::<u32>() {
             return retry_round <= target;
+        }
+        return false;
+    }
+    if let Some(target) = atom.strip_prefix("retry<") {
+        if let Ok(target) = target.trim().parse::<u32>() {
+            return retry_round < target;
         }
         return false;
     }
@@ -689,11 +701,29 @@ fn evaluate_condition_atom(
         }
         return false;
     }
+    if let Some(target) = atom.strip_prefix("team_load<") {
+        if let Ok(target) = target.trim().parse::<usize>() {
+            return routes
+                .get(&rule.route_key)
+                .map(|route| team_load(reports, &route.team_id) < target)
+                .unwrap_or(false);
+        }
+        return false;
+    }
     if let Some(target) = atom.strip_prefix("team_load>=") {
         if let Ok(target) = target.trim().parse::<usize>() {
             return routes
                 .get(&rule.route_key)
                 .map(|route| team_load(reports, &route.team_id) >= target)
+                .unwrap_or(false);
+        }
+        return false;
+    }
+    if let Some(target) = atom.strip_prefix("team_load>") {
+        if let Ok(target) = target.trim().parse::<usize>() {
+            return routes
+                .get(&rule.route_key)
+                .map(|route| team_load(reports, &route.team_id) > target)
                 .unwrap_or(false);
         }
         return false;
@@ -1611,6 +1641,47 @@ mod tests {
         let plugins = registry_from_profile(&profile).expect("plugins");
         let goal = GoalContract {
             goal_id: "goal_test_21".to_string(),
+            objective: "ship feature [[merge:api-conflict]]".to_string(),
+            acceptance_criteria: vec!["tests pass".to_string()],
+        };
+
+        let report = run_company_flow(
+            "ship feature [[merge:api-conflict]]",
+            goal,
+            4,
+            2,
+            true,
+            2,
+            &profile.merge_rework_routes,
+            &profile.merge_rework_rules,
+            false,
+            2,
+            &plugins,
+        )
+        .expect("report");
+
+        assert_eq!(report.status, ProjectStatus::Completed);
+        assert!(report
+            .tasks
+            .iter()
+            .any(|task| task.task_id == "merge_rework_api_1"));
+    }
+
+    #[test]
+    fn company_flow_supports_strict_inequality_expression() {
+        let mut profile = RuntimeProfile::default();
+        profile.team_topology = "multi".to_string();
+        profile.merge_policy = "strict".to_string();
+        if let Some(rule) = profile
+            .merge_rework_rules
+            .iter_mut()
+            .find(|rule| rule.route_key == "api-conflict")
+        {
+            rule.condition_expression = Some("retry>0 && team_load>1 && team_load<5".to_string());
+        }
+        let plugins = registry_from_profile(&profile).expect("plugins");
+        let goal = GoalContract {
+            goal_id: "goal_test_22".to_string(),
             objective: "ship feature [[merge:api-conflict]]".to_string(),
             acceptance_criteria: vec!["tests pass".to_string()],
         };
