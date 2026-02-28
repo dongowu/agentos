@@ -468,15 +468,86 @@ fn rule_conditions_match(
         checks.push(pass);
     }
 
-    if checks.is_empty() {
-        return true;
-    }
-
-    if rule.condition_mode.eq_ignore_ascii_case("any") {
+    let base_pass = if checks.is_empty() {
+        true
+    } else if rule.condition_mode.eq_ignore_ascii_case("any") {
         checks.into_iter().any(|passed| passed)
     } else {
         checks.into_iter().all(|passed| passed)
+    };
+
+    if !base_pass {
+        return false;
     }
+
+    rule.condition_expression
+        .as_ref()
+        .map(|expr| evaluate_condition_expression(expr, reports, retry_round, routes, rule))
+        .unwrap_or(true)
+}
+
+fn evaluate_condition_expression(
+    expression: &str,
+    reports: &[TaskReport],
+    retry_round: u32,
+    routes: &HashMap<String, MergeReworkRoute>,
+    rule: &MergeReworkRule,
+) -> bool {
+    expression
+        .split("||")
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty())
+        .any(|branch| {
+            branch
+                .split("&&")
+                .map(str::trim)
+                .filter(|atom| !atom.is_empty())
+                .all(|atom| evaluate_condition_atom(atom, reports, retry_round, routes, rule))
+        })
+}
+
+fn evaluate_condition_atom(
+    atom: &str,
+    reports: &[TaskReport],
+    retry_round: u32,
+    routes: &HashMap<String, MergeReworkRoute>,
+    rule: &MergeReworkRule,
+) -> bool {
+    if let Some(target) = atom.strip_prefix("risk>=") {
+        return max_risk_level(reports) >= risk_rank(target.trim());
+    }
+    if let Some(target) = atom.strip_prefix("retry>=") {
+        if let Ok(target) = target.trim().parse::<u32>() {
+            return retry_round >= target;
+        }
+        return false;
+    }
+    if let Some(target) = atom.strip_prefix("retry<=") {
+        if let Ok(target) = target.trim().parse::<u32>() {
+            return retry_round <= target;
+        }
+        return false;
+    }
+    if let Some(target) = atom.strip_prefix("team_load<=") {
+        if let Ok(target) = target.trim().parse::<usize>() {
+            return routes
+                .get(&rule.route_key)
+                .map(|route| team_load(reports, &route.team_id) <= target)
+                .unwrap_or(false);
+        }
+        return false;
+    }
+    if let Some(target) = atom.strip_prefix("team_load>=") {
+        if let Ok(target) = target.trim().parse::<usize>() {
+            return routes
+                .get(&rule.route_key)
+                .map(|route| team_load(reports, &route.team_id) >= target)
+                .unwrap_or(false);
+        }
+        return false;
+    }
+
+    false
 }
 
 fn team_load(reports: &[TaskReport], team_id: &str) -> usize {
@@ -957,6 +1028,51 @@ mod tests {
         let plugins = registry_from_profile(&profile).expect("plugins");
         let goal = GoalContract {
             goal_id: "goal_test_13".to_string(),
+            objective: "ship feature [[merge:api-conflict]]".to_string(),
+            acceptance_criteria: vec!["tests pass".to_string()],
+        };
+
+        let report = run_company_flow(
+            "ship feature [[merge:api-conflict]]",
+            goal,
+            4,
+            2,
+            true,
+            2,
+            &profile.merge_rework_routes,
+            &profile.merge_rework_rules,
+            false,
+            2,
+            &plugins,
+        )
+        .expect("report");
+
+        assert_eq!(report.status, ProjectStatus::Completed);
+        assert!(report
+            .tasks
+            .iter()
+            .any(|task| task.task_id == "merge_rework_api_1"));
+    }
+
+    #[test]
+    fn company_flow_supports_condition_expression_route_selection() {
+        let mut profile = RuntimeProfile::default();
+        profile.team_topology = "multi".to_string();
+        profile.merge_policy = "strict".to_string();
+        if let Some(rule) = profile
+            .merge_rework_rules
+            .iter_mut()
+            .find(|rule| rule.route_key == "api-conflict")
+        {
+            rule.condition_mode = "all".to_string();
+            rule.required_risk_level = None;
+            rule.min_retry_round = None;
+            rule.max_team_load = None;
+            rule.condition_expression = Some("retry>=1 && team_load>=2".to_string());
+        }
+        let plugins = registry_from_profile(&profile).expect("plugins");
+        let goal = GoalContract {
+            goal_id: "goal_test_14".to_string(),
             objective: "ship feature [[merge:api-conflict]]".to_string(),
             acceptance_criteria: vec!["tests pass".to_string()],
         };

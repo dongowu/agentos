@@ -91,6 +91,8 @@ pub struct MergeReworkRule {
     pub min_retry_round: Option<u32>,
     #[serde(default)]
     pub max_team_load: Option<usize>,
+    #[serde(default)]
+    pub condition_expression: Option<String>,
 }
 
 fn default_condition_mode() -> String {
@@ -152,6 +154,7 @@ pub fn default_merge_rework_rules() -> Vec<MergeReworkRule> {
             required_risk_level: None,
             min_retry_round: None,
             max_team_load: None,
+            condition_expression: None,
         },
         MergeReworkRule {
             marker: "[[merge:api-conflict]]".to_string(),
@@ -161,6 +164,7 @@ pub fn default_merge_rework_rules() -> Vec<MergeReworkRule> {
             required_risk_level: None,
             min_retry_round: None,
             max_team_load: None,
+            condition_expression: None,
         },
         MergeReworkRule {
             marker: "[[merge:test-conflict]]".to_string(),
@@ -170,6 +174,7 @@ pub fn default_merge_rework_rules() -> Vec<MergeReworkRule> {
             required_risk_level: None,
             min_retry_round: None,
             max_team_load: None,
+            condition_expression: None,
         },
         MergeReworkRule {
             marker: "[[merge:conflict]]".to_string(),
@@ -179,6 +184,7 @@ pub fn default_merge_rework_rules() -> Vec<MergeReworkRule> {
             required_risk_level: None,
             min_retry_round: None,
             max_team_load: None,
+            condition_expression: None,
         },
     ]
 }

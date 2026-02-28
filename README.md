@@ -114,6 +114,7 @@ cargo run -- team-run "交付一个用户登录系统" --profile-file config/tea
 - 路由优先级：可在 `merge_rework_rules` 配置 marker 匹配顺序（priority 越小越先匹配）
 - 条件字段：`required_risk_level` / `min_retry_round` / `max_team_load`（可选）
 - 条件组合：`condition_mode: all|any`（默认 `all`）
+- 表达式条件：`condition_expression` 支持 `risk>=...`、`retry>=...`、`retry<=...`、`team_load<=...`、`team_load>=...`，并可用 `&&`/`||`
 - 角色管理：`--enable-role-failover` + `--max-role-attempts`（或 profile 中配置）
 - 团队管理：`--team-topology single|multi` + `--max-parallel-teams`
 - 策略可通过 `--gate-policy`、`--arbiter-policy`、`--merge-policy` 或 `--profile-file` 动态切换

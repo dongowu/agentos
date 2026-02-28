@@ -40,6 +40,7 @@ merge_rework_rules:
     required_risk_level: low
     min_retry_round: 1
     max_team_load: 5
+    condition_expression: "retry>=1 && team_load>=2"
   - marker: "[[merge:test-conflict]]"
     route_key: test-conflict
     priority: 30
