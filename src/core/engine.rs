@@ -362,8 +362,13 @@ fn evaluate_merge_with_auto_rework(
             .as_ref()
             .map(|rule| {
                 format!(
-                    "marker={} priority={} mode={}",
-                    rule.marker, rule.priority, rule.condition_mode
+                    "marker={} priority={} mode={} expr={}",
+                    rule.marker,
+                    rule.priority,
+                    rule.condition_mode,
+                    rule.condition_expression
+                        .clone()
+                        .unwrap_or_else(|| "<none>".to_string())
                 )
             })
             .unwrap_or_else(|| "marker=<fallback> priority=<none> mode=<none>".to_string());
@@ -1097,5 +1102,9 @@ mod tests {
             .tasks
             .iter()
             .any(|task| task.task_id == "merge_rework_api_1"));
+        assert!(report
+            .trace
+            .iter()
+            .any(|line| line.contains("expr=retry>=1 && team_load>=2")));
     }
 }
