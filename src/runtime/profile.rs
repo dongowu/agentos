@@ -115,6 +115,15 @@ impl RuntimeProfile {
                     rule.route_key
                 );
             }
+
+            if let Some(expression) = rule.condition_expression.as_ref() {
+                validate_condition_expression(expression).with_context(|| {
+                    format!(
+                        "invalid condition_expression for route_key '{}': {}",
+                        rule.route_key, expression
+                    )
+                })?;
+            }
         }
 
         Ok(())
@@ -198,6 +207,78 @@ impl RuntimeProfile {
     }
 }
 
+fn validate_condition_expression(expression: &str) -> Result<()> {
+    let branches: Vec<&str> = expression
+        .split("||")
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty())
+        .collect();
+
+    if branches.is_empty() {
+        bail!("expression must contain at least one branch");
+    }
+
+    for branch in branches {
+        let atoms: Vec<&str> = branch
+            .split("&&")
+            .map(str::trim)
+            .filter(|atom| !atom.is_empty())
+            .collect();
+        if atoms.is_empty() {
+            bail!("branch must contain at least one condition atom");
+        }
+        for atom in atoms {
+            validate_condition_atom(atom)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_condition_atom(atom: &str) -> Result<()> {
+    if let Some(value) = atom.strip_prefix("risk>=") {
+        let level = value.trim();
+        if level == "low" || level == "medium" || level == "high" {
+            return Ok(());
+        }
+        bail!("unsupported risk level '{}'", level);
+    }
+
+    if let Some(value) = atom.strip_prefix("retry>=") {
+        value
+            .trim()
+            .parse::<u32>()
+            .with_context(|| format!("invalid retry bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
+    if let Some(value) = atom.strip_prefix("retry<=") {
+        value
+            .trim()
+            .parse::<u32>()
+            .with_context(|| format!("invalid retry bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
+    if let Some(value) = atom.strip_prefix("team_load<=") {
+        value
+            .trim()
+            .parse::<usize>()
+            .with_context(|| format!("invalid team_load bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
+    if let Some(value) = atom.strip_prefix("team_load>=") {
+        value
+            .trim()
+            .parse::<usize>()
+            .with_context(|| format!("invalid team_load bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
+    bail!("unsupported condition atom '{}'", atom)
+}
+
 #[cfg(test)]
 mod tests {
     use super::RuntimeProfile;
@@ -222,6 +303,22 @@ mod tests {
     fn accepts_uppercase_condition_mode() {
         let mut profile = RuntimeProfile::default();
         profile.merge_rework_rules[0].condition_mode = "ANY".to_string();
+        profile.validate().expect("should pass");
+    }
+
+    #[test]
+    fn rejects_invalid_condition_expression_atom() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_expression = Some("foo==bar".to_string());
+        let err = profile.validate().expect_err("should fail");
+        assert!(err.to_string().contains("invalid condition_expression"));
+    }
+
+    #[test]
+    fn accepts_valid_condition_expression() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_expression =
+            Some("risk>=medium && retry>=1 || team_load<=3".to_string());
         profile.validate().expect("should pass");
     }
 }
