@@ -607,17 +607,23 @@ fn evaluate_condition_expression(
     routes: &HashMap<String, MergeReworkRoute>,
     rule: &MergeReworkRule,
 ) -> bool {
-    expression
-        .split("||")
-        .map(str::trim)
-        .filter(|branch| !branch.is_empty())
-        .any(|branch| {
-            branch
-                .split("&&")
-                .map(str::trim)
-                .filter(|atom| !atom.is_empty())
-                .all(|atom| evaluate_condition_atom(atom, reports, retry_round, routes, rule))
-        })
+    let expr = strip_outer_parentheses(expression.trim());
+
+    let or_parts = split_top_level(expr, "||");
+    if or_parts.len() > 1 {
+        return or_parts
+            .iter()
+            .any(|part| evaluate_condition_expression(part, reports, retry_round, routes, rule));
+    }
+
+    let and_parts = split_top_level(expr, "&&");
+    if and_parts.len() > 1 {
+        return and_parts
+            .iter()
+            .all(|part| evaluate_condition_expression(part, reports, retry_round, routes, rule));
+    }
+
+    evaluate_condition_atom(expr, reports, retry_round, routes, rule)
 }
 
 fn evaluate_condition_atom(
@@ -627,11 +633,17 @@ fn evaluate_condition_atom(
     routes: &HashMap<String, MergeReworkRoute>,
     rule: &MergeReworkRule,
 ) -> bool {
+    let atom = atom.trim();
+
     if atom.eq_ignore_ascii_case("true") {
         return true;
     }
     if atom.eq_ignore_ascii_case("false") {
         return false;
+    }
+
+    if atom.starts_with('(') && atom.ends_with(')') {
+        return evaluate_condition_expression(atom, reports, retry_round, routes, rule);
     }
 
     if let Some(inner) = atom.strip_prefix('!') {
@@ -697,6 +709,79 @@ fn evaluate_condition_atom(
     }
 
     false
+}
+
+fn split_top_level<'a>(expression: &'a str, operator: &str) -> Vec<&'a str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    let bytes = expression.as_bytes();
+    let op_bytes = operator.as_bytes();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        match bytes[i] as char {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+
+        if depth == 0
+            && i + op_bytes.len() <= bytes.len()
+            && &bytes[i..i + op_bytes.len()] == op_bytes
+        {
+            let part = expression[start..i].trim();
+            if !part.is_empty() {
+                parts.push(part);
+            }
+            i += op_bytes.len();
+            start = i;
+            continue;
+        }
+
+        i += 1;
+    }
+
+    let tail = expression[start..].trim();
+    if !tail.is_empty() {
+        parts.push(tail);
+    }
+
+    if parts.is_empty() {
+        vec![expression]
+    } else {
+        parts
+    }
+}
+
+fn strip_outer_parentheses(mut expression: &str) -> &str {
+    loop {
+        let trimmed = expression.trim();
+        if !(trimmed.starts_with('(') && trimmed.ends_with(')')) {
+            return trimmed;
+        }
+
+        let mut depth = 0usize;
+        let mut encloses_all = true;
+        for (idx, ch) in trimmed.char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 && idx != trimmed.len() - 1 {
+                        encloses_all = false;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if !encloses_all {
+            return trimmed;
+        }
+        expression = &trimmed[1..trimmed.len() - 1];
+    }
 }
 
 fn team_load(reports: &[TaskReport], team_id: &str) -> usize {
@@ -1485,6 +1570,47 @@ mod tests {
         let plugins = registry_from_profile(&profile).expect("plugins");
         let goal = GoalContract {
             goal_id: "goal_test_20".to_string(),
+            objective: "ship feature [[merge:api-conflict]]".to_string(),
+            acceptance_criteria: vec!["tests pass".to_string()],
+        };
+
+        let report = run_company_flow(
+            "ship feature [[merge:api-conflict]]",
+            goal,
+            4,
+            2,
+            true,
+            2,
+            &profile.merge_rework_routes,
+            &profile.merge_rework_rules,
+            false,
+            2,
+            &plugins,
+        )
+        .expect("report");
+
+        assert_eq!(report.status, ProjectStatus::Completed);
+        assert!(report
+            .tasks
+            .iter()
+            .any(|task| task.task_id == "merge_rework_api_1"));
+    }
+
+    #[test]
+    fn company_flow_supports_parenthesized_expression() {
+        let mut profile = RuntimeProfile::default();
+        profile.team_topology = "multi".to_string();
+        profile.merge_policy = "strict".to_string();
+        if let Some(rule) = profile
+            .merge_rework_rules
+            .iter_mut()
+            .find(|rule| rule.route_key == "api-conflict")
+        {
+            rule.condition_expression = Some("(risk==high || retry==1) && !false".to_string());
+        }
+        let plugins = registry_from_profile(&profile).expect("plugins");
+        let goal = GoalContract {
+            goal_id: "goal_test_21".to_string(),
             objective: "ship feature [[merge:api-conflict]]".to_string(),
             acceptance_criteria: vec!["tests pass".to_string()],
         };
