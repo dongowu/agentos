@@ -116,6 +116,15 @@ impl RuntimeProfile {
                 );
             }
 
+            if let Some(required) = rule.required_risk_level.as_ref() {
+                validate_risk_level(required).with_context(|| {
+                    format!(
+                        "invalid required_risk_level for route_key '{}': {}",
+                        rule.route_key, required
+                    )
+                })?;
+            }
+
             if let Some(expression) = rule.condition_expression.as_ref() {
                 validate_condition_expression(expression).with_context(|| {
                     format!(
@@ -248,27 +257,15 @@ fn validate_condition_expression(expression: &str) -> Result<()> {
 
 fn validate_condition_atom(atom: &str) -> Result<()> {
     if let Some(value) = atom.strip_prefix("risk==") {
-        let level = value.trim();
-        if level == "low" || level == "medium" || level == "high" {
-            return Ok(());
-        }
-        bail!("unsupported risk level '{}'", level);
+        return validate_risk_level(value.trim());
     }
 
     if let Some(value) = atom.strip_prefix("risk>=") {
-        let level = value.trim();
-        if level == "low" || level == "medium" || level == "high" {
-            return Ok(());
-        }
-        bail!("unsupported risk level '{}'", level);
+        return validate_risk_level(value.trim());
     }
 
     if let Some(value) = atom.strip_prefix("risk<=") {
-        let level = value.trim();
-        if level == "low" || level == "medium" || level == "high" {
-            return Ok(());
-        }
-        bail!("unsupported risk level '{}'", level);
+        return validate_risk_level(value.trim());
     }
 
     if let Some(value) = atom.strip_prefix("retry>=") {
@@ -304,6 +301,14 @@ fn validate_condition_atom(atom: &str) -> Result<()> {
     }
 
     bail!("unsupported condition atom '{}'", atom)
+}
+
+fn validate_risk_level(level: &str) -> Result<()> {
+    let normalized = level.trim().to_ascii_lowercase();
+    if normalized == "low" || normalized == "medium" || normalized == "high" {
+        return Ok(());
+    }
+    bail!("unsupported risk level '{}'", level)
 }
 
 #[cfg(test)]
@@ -361,6 +366,13 @@ mod tests {
     fn accepts_risk_equal_expression() {
         let mut profile = RuntimeProfile::default();
         profile.merge_rework_rules[0].condition_expression = Some("risk==low".to_string());
+        profile.validate().expect("should pass");
+    }
+
+    #[test]
+    fn accepts_case_insensitive_required_risk_level() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].required_risk_level = Some("HIGH".to_string());
         profile.validate().expect("should pass");
     }
 }
