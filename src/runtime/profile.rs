@@ -228,31 +228,130 @@ impl RuntimeProfile {
 }
 
 fn validate_condition_expression(expression: &str) -> Result<()> {
-    let branches: Vec<&str> = expression
-        .split("||")
-        .map(str::trim)
-        .filter(|branch| !branch.is_empty())
-        .collect();
+    let expr = expression.trim();
+    if expr.is_empty() {
+        bail!("expression must contain at least one branch");
+    }
+    if !has_balanced_parentheses(expr) {
+        bail!("expression has unbalanced parentheses");
+    }
 
-    if branches.is_empty() {
+    validate_condition_expression_recursive(expr)
+}
+
+fn validate_condition_expression_recursive(expression: &str) -> Result<()> {
+    let expr = strip_outer_parentheses(expression.trim());
+    if expr.is_empty() {
         bail!("expression must contain at least one branch");
     }
 
-    for branch in branches {
-        let atoms: Vec<&str> = branch
-            .split("&&")
-            .map(str::trim)
-            .filter(|atom| !atom.is_empty())
-            .collect();
-        if atoms.is_empty() {
-            bail!("branch must contain at least one condition atom");
+    let or_parts = split_top_level(expr, "||");
+    if or_parts.len() > 1 {
+        for part in or_parts {
+            validate_condition_expression_recursive(part)?;
         }
-        for atom in atoms {
-            validate_condition_atom(atom)?;
-        }
+        return Ok(());
     }
 
-    Ok(())
+    let and_parts = split_top_level(expr, "&&");
+    if and_parts.len() > 1 {
+        for part in and_parts {
+            validate_condition_expression_recursive(part)?;
+        }
+        return Ok(());
+    }
+
+    validate_condition_atom(expr)
+}
+
+fn split_top_level<'a>(expression: &'a str, operator: &str) -> Vec<&'a str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    let bytes = expression.as_bytes();
+    let op_bytes = operator.as_bytes();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        match bytes[i] as char {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+
+        if depth == 0
+            && i + op_bytes.len() <= bytes.len()
+            && &bytes[i..i + op_bytes.len()] == op_bytes
+        {
+            let part = expression[start..i].trim();
+            if !part.is_empty() {
+                parts.push(part);
+            }
+            i += op_bytes.len();
+            start = i;
+            continue;
+        }
+
+        i += 1;
+    }
+
+    let tail = expression[start..].trim();
+    if !tail.is_empty() {
+        parts.push(tail);
+    }
+
+    if parts.is_empty() {
+        vec![expression]
+    } else {
+        parts
+    }
+}
+
+fn strip_outer_parentheses(mut expression: &str) -> &str {
+    loop {
+        let trimmed = expression.trim();
+        if !(trimmed.starts_with('(') && trimmed.ends_with(')')) {
+            return trimmed;
+        }
+
+        let mut depth = 0usize;
+        let mut encloses_all = true;
+        for (idx, ch) in trimmed.char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 && idx != trimmed.len() - 1 {
+                        encloses_all = false;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if !encloses_all {
+            return trimmed;
+        }
+        expression = &trimmed[1..trimmed.len() - 1];
+    }
+}
+
+fn has_balanced_parentheses(expression: &str) -> bool {
+    let mut depth = 0usize;
+    for ch in expression.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                if depth == 0 {
+                    return false;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    depth == 0
 }
 
 fn validate_condition_atom(atom: &str) -> Result<()> {
@@ -423,5 +522,21 @@ mod tests {
         let mut profile = RuntimeProfile::default();
         profile.merge_rework_rules[0].condition_expression = Some("true && !false".to_string());
         profile.validate().expect("should pass");
+    }
+
+    #[test]
+    fn accepts_parenthesized_condition_expression() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_expression =
+            Some("(risk==low || retry==2) && !false".to_string());
+        profile.validate().expect("should pass");
+    }
+
+    #[test]
+    fn rejects_unbalanced_parentheses_expression() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_expression = Some("(risk==low".to_string());
+        let err = profile.validate().expect_err("should fail");
+        assert!(err.to_string().contains("invalid condition_expression"));
     }
 }
