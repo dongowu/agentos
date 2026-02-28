@@ -83,6 +83,9 @@ cargo run -- team-run "交付一个用户登录系统" --max-parallel 3
 # 运行时动态调整策略（命令行覆盖）
 cargo run -- team-run "交付一个用户登录系统" --gate-policy majority --arbiter-policy immediate_escalation
 
+# 切换跨团队合并策略
+cargo run -- team-run "交付一个用户登录系统" --team-topology multi --merge-policy fast
+
 # 启用多团队拓扑（跨团队并行收敛）
 cargo run -- team-run "交付一个用户登录系统" --team-topology multi --max-parallel 4 --max-parallel-teams 2
 
@@ -98,9 +101,10 @@ cargo run -- team-run "交付一个用户登录系统" --profile-file config/tea
 - 4 个 Gate：Intake / Freeze / Release / Closure
 - Gate 规则：`unanimous` / `majority`
 - 冲突处理：`two_round` / `immediate_escalation`
+- 跨团队合并：`strict` / `fast`
 - 角色管理：`--enable-role-failover` + `--max-role-attempts`（或 profile 中配置）
 - 团队管理：`--team-topology single|multi` + `--max-parallel-teams`
-- 策略可通过 `--gate-policy`、`--arbiter-policy` 或 `--profile-file` 动态切换
+- 策略可通过 `--gate-policy`、`--arbiter-policy`、`--merge-policy` 或 `--profile-file` 动态切换
 
 ## 工作流配置
 

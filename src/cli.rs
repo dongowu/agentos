@@ -86,6 +86,8 @@ enum Commands {
         gate_policy: Option<String>,
         #[arg(long)]
         arbiter_policy: Option<String>,
+        #[arg(long)]
+        merge_policy: Option<String>,
     },
 }
 
@@ -195,10 +197,12 @@ pub fn run() -> Result<()> {
             profile_file,
             gate_policy,
             arbiter_policy,
+            merge_policy,
         } => {
             let profile = RuntimeProfile::load(profile_file.as_deref())?
                 .with_gate_policy(gate_policy)
                 .with_arbiter_policy(arbiter_policy)
+                .with_merge_policy(merge_policy)
                 .with_team_topology(team_topology)
                 .with_max_parallel_teams(max_parallel_teams)
                 .with_role_failover(enable_role_failover)

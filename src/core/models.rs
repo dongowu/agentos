@@ -60,6 +60,14 @@ pub struct GateOutcome {
     pub escalated_to_human: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeOutcome {
+    pub approved: bool,
+    pub attempts: u32,
+    pub note: String,
+    pub escalated_to_human: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProjectStatus {
     Completed,
@@ -71,6 +79,7 @@ pub struct ProjectReport {
     pub goal: GoalContract,
     pub status: ProjectStatus,
     pub tasks: Vec<TaskReport>,
+    pub merge: Option<MergeOutcome>,
     pub gates: Vec<GateOutcome>,
     pub trace: Vec<String>,
 }

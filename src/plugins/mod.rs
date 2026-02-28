@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::core::models::{GateId, GateVote, GoalContract, TaskNode, TaskReport};
+use crate::core::models::{GateId, GateVote, GoalContract, MergeOutcome, TaskNode, TaskReport};
 
 pub mod builtin;
 
@@ -47,6 +47,10 @@ pub trait ArbiterPolicy: Send + Sync {
     fn resolve(&self, gate: GateId, votes: &[GateVote]) -> ArbiterDecision;
 }
 
+pub trait MergePolicy: Send + Sync {
+    fn merge(&self, reports: &[TaskReport], requirement: &str) -> MergeOutcome;
+}
+
 #[derive(Clone)]
 pub struct PluginRegistry {
     pub role_provider: Arc<dyn RoleProvider>,
@@ -54,4 +58,5 @@ pub struct PluginRegistry {
     pub gate_policy: Arc<dyn GatePolicy>,
     pub arbiter_policy: Arc<dyn ArbiterPolicy>,
     pub risk_policy: Arc<dyn RiskPolicy>,
+    pub merge_policy: Arc<dyn MergePolicy>,
 }

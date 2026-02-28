@@ -3,10 +3,12 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use anyhow::Result;
 
-use crate::core::models::{Department, GateId, GateVote, GoalContract, TaskNode, TaskReport};
+use crate::core::models::{
+    Department, GateId, GateVote, GoalContract, MergeOutcome, TaskNode, TaskReport,
+};
 use crate::plugins::{
-    ArbiterDecision, ArbiterPolicy, GatePolicy, RiskPolicy, RoleExecution, RoleProvider,
-    TeamStrategy,
+    ArbiterDecision, ArbiterPolicy, GatePolicy, MergePolicy, RiskPolicy, RoleExecution,
+    RoleProvider, TeamStrategy,
 };
 
 pub struct BuiltinRoleProvider {
@@ -402,6 +404,80 @@ impl ArbiterPolicy for EscalateImmediatelyArbiter {
                 gate
             ),
             escalated_to_human: true,
+        }
+    }
+}
+
+pub struct StrictMergePolicy;
+
+impl MergePolicy for StrictMergePolicy {
+    fn merge(&self, reports: &[TaskReport], requirement: &str) -> MergeOutcome {
+        let has_cross_team_reports = reports.iter().any(|r| r.team_id == "platform_team")
+            && reports.iter().any(|r| r.team_id == "feature_team");
+        if !has_cross_team_reports {
+            return MergeOutcome {
+                approved: true,
+                attempts: 1,
+                note: "single-team delivery, no cross-team merge required".to_string(),
+                escalated_to_human: false,
+            };
+        }
+
+        if requirement.contains("[[merge:conflict]]") {
+            if requirement.contains("[[merge:retry-ok]]") {
+                return MergeOutcome {
+                    approved: true,
+                    attempts: 2,
+                    note: "merge conflict resolved on retry with supervisor guidance".to_string(),
+                    escalated_to_human: false,
+                };
+            }
+            return MergeOutcome {
+                approved: false,
+                attempts: 2,
+                note: "merge conflict persists after retry, escalation required".to_string(),
+                escalated_to_human: true,
+            };
+        }
+
+        MergeOutcome {
+            approved: true,
+            attempts: 1,
+            note: "cross-team artifacts merged successfully".to_string(),
+            escalated_to_human: false,
+        }
+    }
+}
+
+pub struct FastMergePolicy;
+
+impl MergePolicy for FastMergePolicy {
+    fn merge(&self, reports: &[TaskReport], requirement: &str) -> MergeOutcome {
+        let has_cross_team_reports = reports.iter().any(|r| r.team_id == "platform_team")
+            && reports.iter().any(|r| r.team_id == "feature_team");
+        if !has_cross_team_reports {
+            return MergeOutcome {
+                approved: true,
+                attempts: 1,
+                note: "single-team delivery, no cross-team merge required".to_string(),
+                escalated_to_human: false,
+            };
+        }
+
+        if requirement.contains("[[merge:block]]") {
+            return MergeOutcome {
+                approved: false,
+                attempts: 1,
+                note: "fast merge policy blocked by explicit requirement marker".to_string(),
+                escalated_to_human: true,
+            };
+        }
+
+        MergeOutcome {
+            approved: true,
+            attempts: 1,
+            note: "fast merge accepted artifacts without retry".to_string(),
+            escalated_to_human: false,
         }
     }
 }

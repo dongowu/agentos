@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::plugins::builtin::{
     BuiltinRiskPolicy, BuiltinRoleProvider, BuiltinTeamStrategy, EscalateImmediatelyArbiter,
-    MajorityGatePolicy, TwoRoundArbiter, UnanimousGatePolicy,
+    FastMergePolicy, MajorityGatePolicy, StrictMergePolicy, TwoRoundArbiter, UnanimousGatePolicy,
 };
 use crate::plugins::PluginRegistry;
 use crate::runtime::profile::RuntimeProfile;
@@ -21,6 +21,12 @@ pub fn registry_from_profile(profile: &RuntimeProfile) -> Result<PluginRegistry>
         other => bail!("unsupported arbiter policy: {}", other),
     };
 
+    let merge_policy = match profile.merge_policy.as_str() {
+        "strict" => Arc::new(StrictMergePolicy) as _,
+        "fast" => Arc::new(FastMergePolicy) as _,
+        other => bail!("unsupported merge policy: {}", other),
+    };
+
     Ok(PluginRegistry {
         role_provider: Arc::new(BuiltinRoleProvider::from_overrides(
             profile.role_instances.clone(),
@@ -29,6 +35,7 @@ pub fn registry_from_profile(profile: &RuntimeProfile) -> Result<PluginRegistry>
         gate_policy,
         arbiter_policy,
         risk_policy: Arc::new(BuiltinRiskPolicy),
+        merge_policy,
     })
 }
 
@@ -42,6 +49,7 @@ mod tests {
         let profile = RuntimeProfile {
             gate_policy: "does_not_exist".to_string(),
             arbiter_policy: "two_round".to_string(),
+            merge_policy: "strict".to_string(),
             role_failover: false,
             max_role_attempts: 2,
             role_instances: Default::default(),

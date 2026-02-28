@@ -3,7 +3,8 @@ use std::collections::HashSet;
 use anyhow::{anyhow, Result};
 
 use crate::core::models::{
-    GateId, GateOutcome, GoalContract, ProjectReport, ProjectStatus, TaskNode, TaskReport,
+    GateId, GateOutcome, GoalContract, MergeOutcome, ProjectReport, ProjectStatus, TaskNode,
+    TaskReport,
 };
 use crate::core::scheduler::next_runnable;
 use crate::core::trace::TraceLog;
@@ -26,6 +27,7 @@ pub fn run_company_flow(
     let mut completed = HashSet::new();
     let mut running = HashSet::new();
     let mut task_reports = Vec::new();
+    let mut merge_outcome: Option<MergeOutcome> = None;
     let mut gate_outcomes = Vec::new();
     let mut trace = TraceLog::default();
 
@@ -106,6 +108,7 @@ pub fn run_company_flow(
                     goal,
                     status: ProjectStatus::NeedsHumanDecision,
                     tasks: task_reports,
+                    merge: merge_outcome,
                     gates: gate_outcomes,
                     trace: trace.into_entries(),
                 });
@@ -138,6 +141,7 @@ pub fn run_company_flow(
                     goal,
                     status: ProjectStatus::NeedsHumanDecision,
                     tasks: task_reports,
+                    merge: merge_outcome,
                     gates: gate_outcomes,
                     trace: trace.into_entries(),
                 });
@@ -159,11 +163,28 @@ pub fn run_company_flow(
                     goal,
                     status: ProjectStatus::NeedsHumanDecision,
                     tasks: task_reports,
+                    merge: merge_outcome,
                     gates: gate_outcomes,
                     trace: trace.into_entries(),
                 });
             }
             gate_outcomes.push(outcome);
+        }
+
+        if merge_outcome.is_none() && merge_ready(&completed) {
+            let outcome = evaluate_merge(requirement, &task_reports, plugins, &mut trace);
+            if !outcome.approved {
+                merge_outcome = Some(outcome);
+                return Ok(ProjectReport {
+                    goal,
+                    status: ProjectStatus::NeedsHumanDecision,
+                    tasks: task_reports,
+                    merge: merge_outcome,
+                    gates: gate_outcomes,
+                    trace: trace.into_entries(),
+                });
+            }
+            merge_outcome = Some(outcome);
         }
 
         if completed.contains("release_plan") && !has_gate(&gate_outcomes, GateId::Release) {
@@ -180,6 +201,7 @@ pub fn run_company_flow(
                     goal,
                     status: ProjectStatus::NeedsHumanDecision,
                     tasks: task_reports,
+                    merge: merge_outcome,
                     gates: gate_outcomes,
                     trace: trace.into_entries(),
                 });
@@ -206,6 +228,7 @@ pub fn run_company_flow(
         goal,
         status,
         tasks: task_reports,
+        merge: merge_outcome,
         gates: gate_outcomes,
         trace: trace.into_entries(),
     })
@@ -218,6 +241,11 @@ fn has_gate(gates: &[GateOutcome], gate: GateId) -> bool {
 fn freeze_ready(completed: &HashSet<String>) -> bool {
     completed.contains("design")
         || (completed.contains("platform_design") && completed.contains("feature_design"))
+}
+
+fn merge_ready(completed: &HashSet<String>) -> bool {
+    completed.contains("implementation")
+        || (completed.contains("platform_impl") && completed.contains("feature_impl"))
 }
 
 fn limit_batch_by_team(batch: Vec<TaskNode>, max_parallel_teams: usize) -> Vec<TaskNode> {
@@ -267,6 +295,27 @@ fn evaluate_gate(
         arbitration_note: Some(arbiter.note),
         escalated_to_human: arbiter.escalated_to_human,
     }
+}
+
+fn evaluate_merge(
+    requirement: &str,
+    reports: &[TaskReport],
+    plugins: &PluginRegistry,
+    trace: &mut TraceLog,
+) -> MergeOutcome {
+    let outcome = plugins.merge_policy.merge(reports, requirement);
+    if outcome.approved {
+        trace.push(format!(
+            "merge approved (attempts={}): {}",
+            outcome.attempts, outcome.note
+        ));
+    } else {
+        trace.push(format!(
+            "merge blocked (attempts={}): {}",
+            outcome.attempts, outcome.note
+        ));
+    }
+    outcome
 }
 
 #[cfg(test)]
@@ -373,5 +422,61 @@ mod tests {
             .tasks
             .iter()
             .any(|task| task.team_id == "feature_team"));
+    }
+
+    #[test]
+    fn company_flow_blocks_when_strict_merge_conflict_persists() {
+        let mut profile = RuntimeProfile::default();
+        profile.team_topology = "multi".to_string();
+        profile.merge_policy = "strict".to_string();
+        let plugins = registry_from_profile(&profile).expect("plugins");
+        let goal = GoalContract {
+            goal_id: "goal_test_5".to_string(),
+            objective: "ship feature [[merge:conflict]]".to_string(),
+            acceptance_criteria: vec!["tests pass".to_string()],
+        };
+
+        let report = run_company_flow(
+            "ship feature [[merge:conflict]]",
+            goal,
+            4,
+            2,
+            false,
+            2,
+            &plugins,
+        )
+        .expect("report");
+        assert_eq!(report.status, ProjectStatus::NeedsHumanDecision);
+        let merge = report.merge.expect("merge outcome");
+        assert!(!merge.approved);
+        assert!(merge.escalated_to_human);
+    }
+
+    #[test]
+    fn company_flow_allows_retry_successful_merge() {
+        let mut profile = RuntimeProfile::default();
+        profile.team_topology = "multi".to_string();
+        profile.merge_policy = "strict".to_string();
+        let plugins = registry_from_profile(&profile).expect("plugins");
+        let goal = GoalContract {
+            goal_id: "goal_test_6".to_string(),
+            objective: "ship feature [[merge:conflict]] [[merge:retry-ok]]".to_string(),
+            acceptance_criteria: vec!["tests pass".to_string()],
+        };
+
+        let report = run_company_flow(
+            "ship feature [[merge:conflict]] [[merge:retry-ok]]",
+            goal,
+            4,
+            2,
+            false,
+            2,
+            &plugins,
+        )
+        .expect("report");
+        assert_eq!(report.status, ProjectStatus::Completed);
+        let merge = report.merge.expect("merge outcome");
+        assert!(merge.approved);
+        assert_eq!(merge.attempts, 2);
     }
 }

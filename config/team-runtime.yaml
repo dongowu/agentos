@@ -1,5 +1,6 @@
 gate_policy: unanimous
 arbiter_policy: two_round
+merge_policy: strict
 role_failover: false
 max_role_attempts: 2
 team_topology: single
