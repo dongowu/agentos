@@ -355,6 +355,8 @@ fn has_balanced_parentheses(expression: &str) -> bool {
 }
 
 fn validate_condition_atom(atom: &str) -> Result<()> {
+    let atom = atom.trim();
+
     if atom.eq_ignore_ascii_case("true") || atom.eq_ignore_ascii_case("false") {
         return Ok(());
     }
@@ -369,13 +371,22 @@ fn validate_condition_atom(atom: &str) -> Result<()> {
     if let Some(value) = atom.strip_prefix("risk==") {
         return validate_risk_level(value.trim());
     }
+    if let Some((_lhs, rhs)) = split_infix_atom(atom, "risk", "==") {
+        return validate_risk_level(rhs);
+    }
 
     if let Some(value) = atom.strip_prefix("risk>=") {
         return validate_risk_level(value.trim());
     }
+    if let Some((_lhs, rhs)) = split_infix_atom(atom, "risk", ">=") {
+        return validate_risk_level(rhs);
+    }
 
     if let Some(value) = atom.strip_prefix("risk<=") {
         return validate_risk_level(value.trim());
+    }
+    if let Some((_lhs, rhs)) = split_infix_atom(atom, "risk", "<=") {
+        return validate_risk_level(rhs);
     }
 
     if let Some(value) = atom.strip_prefix("retry>=") {
@@ -383,6 +394,11 @@ fn validate_condition_atom(atom: &str) -> Result<()> {
             .trim()
             .parse::<u32>()
             .with_context(|| format!("invalid retry bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+    if let Some((_lhs, rhs)) = split_infix_atom(atom, "retry", ">=") {
+        rhs.parse::<u32>()
+            .with_context(|| format!("invalid retry bound '{}'", rhs))?;
         return Ok(());
     }
 
@@ -393,12 +409,22 @@ fn validate_condition_atom(atom: &str) -> Result<()> {
             .with_context(|| format!("invalid retry bound '{}'", value.trim()))?;
         return Ok(());
     }
+    if let Some((_lhs, rhs)) = split_infix_atom(atom, "retry", ">") {
+        rhs.parse::<u32>()
+            .with_context(|| format!("invalid retry bound '{}'", rhs))?;
+        return Ok(());
+    }
 
     if let Some(value) = atom.strip_prefix("retry<=") {
         value
             .trim()
             .parse::<u32>()
             .with_context(|| format!("invalid retry bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+    if let Some((_lhs, rhs)) = split_infix_atom(atom, "retry", "<=") {
+        rhs.parse::<u32>()
+            .with_context(|| format!("invalid retry bound '{}'", rhs))?;
         return Ok(());
     }
 
@@ -409,12 +435,22 @@ fn validate_condition_atom(atom: &str) -> Result<()> {
             .with_context(|| format!("invalid retry bound '{}'", value.trim()))?;
         return Ok(());
     }
+    if let Some((_lhs, rhs)) = split_infix_atom(atom, "retry", "<") {
+        rhs.parse::<u32>()
+            .with_context(|| format!("invalid retry bound '{}'", rhs))?;
+        return Ok(());
+    }
 
     if let Some(value) = atom.strip_prefix("retry==") {
         value
             .trim()
             .parse::<u32>()
             .with_context(|| format!("invalid retry bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+    if let Some((_lhs, rhs)) = split_infix_atom(atom, "retry", "==") {
+        rhs.parse::<u32>()
+            .with_context(|| format!("invalid retry bound '{}'", rhs))?;
         return Ok(());
     }
 
@@ -425,12 +461,22 @@ fn validate_condition_atom(atom: &str) -> Result<()> {
             .with_context(|| format!("invalid team_load bound '{}'", value.trim()))?;
         return Ok(());
     }
+    if let Some((_lhs, rhs)) = split_infix_atom(atom, "team_load", "<=") {
+        rhs.parse::<usize>()
+            .with_context(|| format!("invalid team_load bound '{}'", rhs))?;
+        return Ok(());
+    }
 
     if let Some(value) = atom.strip_prefix("team_load<") {
         value
             .trim()
             .parse::<usize>()
             .with_context(|| format!("invalid team_load bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+    if let Some((_lhs, rhs)) = split_infix_atom(atom, "team_load", "<") {
+        rhs.parse::<usize>()
+            .with_context(|| format!("invalid team_load bound '{}'", rhs))?;
         return Ok(());
     }
 
@@ -441,6 +487,11 @@ fn validate_condition_atom(atom: &str) -> Result<()> {
             .with_context(|| format!("invalid team_load bound '{}'", value.trim()))?;
         return Ok(());
     }
+    if let Some((_lhs, rhs)) = split_infix_atom(atom, "team_load", ">=") {
+        rhs.parse::<usize>()
+            .with_context(|| format!("invalid team_load bound '{}'", rhs))?;
+        return Ok(());
+    }
 
     if let Some(value) = atom.strip_prefix("team_load>") {
         value
@@ -449,12 +500,22 @@ fn validate_condition_atom(atom: &str) -> Result<()> {
             .with_context(|| format!("invalid team_load bound '{}'", value.trim()))?;
         return Ok(());
     }
+    if let Some((_lhs, rhs)) = split_infix_atom(atom, "team_load", ">") {
+        rhs.parse::<usize>()
+            .with_context(|| format!("invalid team_load bound '{}'", rhs))?;
+        return Ok(());
+    }
 
     if let Some(value) = atom.strip_prefix("team_load==") {
         value
             .trim()
             .parse::<usize>()
             .with_context(|| format!("invalid team_load bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+    if let Some((_lhs, rhs)) = split_infix_atom(atom, "team_load", "==") {
+        rhs.parse::<usize>()
+            .with_context(|| format!("invalid team_load bound '{}'", rhs))?;
         return Ok(());
     }
 
@@ -467,6 +528,20 @@ fn validate_risk_level(level: &str) -> Result<()> {
         return Ok(());
     }
     bail!("unsupported risk level '{}'", level)
+}
+
+fn split_infix_atom<'a>(atom: &'a str, field: &str, op: &str) -> Option<(&'a str, &'a str)> {
+    let parts: Vec<&str> = atom.splitn(2, op).collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let lhs = parts[0].trim();
+    let rhs = parts[1].trim();
+    if lhs.eq_ignore_ascii_case(field) && !rhs.is_empty() {
+        Some((lhs, rhs))
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -569,6 +644,14 @@ mod tests {
         let mut profile = RuntimeProfile::default();
         profile.merge_rework_rules[0].condition_expression =
             Some("retry>0 && retry<3 && team_load>1 && team_load<5".to_string());
+        profile.validate().expect("should pass");
+    }
+
+    #[test]
+    fn accepts_whitespace_infix_expression() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_expression =
+            Some("retry >= 1 && team_load <= 3 && risk == low".to_string());
         profile.validate().expect("should pass");
     }
 
