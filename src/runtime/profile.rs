@@ -26,6 +26,8 @@ pub struct RuntimeProfile {
     #[serde(default = "default_llm_script_max_attempts")]
     pub llm_script_max_attempts: u32,
     #[serde(default)]
+    pub llm_script_timeout_ms: Option<u64>,
+    #[serde(default)]
     pub merge_auto_rework: bool,
     #[serde(default = "default_max_merge_retries")]
     pub max_merge_retries: u32,
@@ -103,6 +105,7 @@ impl Default for RuntimeProfile {
             llm_model: default_llm_model(),
             llm_script_command: None,
             llm_script_max_attempts: default_llm_script_max_attempts(),
+            llm_script_timeout_ms: None,
             merge_auto_rework: false,
             max_merge_retries: default_max_merge_retries(),
             merge_rework_routes: default_routes(),
@@ -141,6 +144,12 @@ impl RuntimeProfile {
 
             if self.llm_script_max_attempts == 0 {
                 bail!("llm_script_max_attempts must be >= 1 when llm_adapter='script'");
+            }
+
+            if let Some(timeout) = self.llm_script_timeout_ms {
+                if timeout == 0 {
+                    bail!("llm_script_timeout_ms must be > 0 when set");
+                }
             }
         }
 
@@ -254,6 +263,13 @@ impl RuntimeProfile {
     pub fn with_llm_script_max_attempts(mut self, max_attempts: Option<u32>) -> Self {
         if let Some(max_attempts) = max_attempts {
             self.llm_script_max_attempts = max_attempts.max(1);
+        }
+        self
+    }
+
+    pub fn with_llm_script_timeout_ms(mut self, timeout_ms: Option<u64>) -> Self {
+        if let Some(timeout_ms) = timeout_ms {
+            self.llm_script_timeout_ms = Some(timeout_ms.max(1));
         }
         self
     }
@@ -764,5 +780,18 @@ mod tests {
         assert!(err
             .to_string()
             .contains("llm_script_max_attempts must be >= 1"));
+    }
+
+    #[test]
+    fn rejects_zero_script_timeout_for_script_adapter() {
+        let mut profile = RuntimeProfile::default();
+        profile.llm_adapter = "script".to_string();
+        profile.llm_script_command = Some("printf ok".to_string());
+        profile.llm_script_timeout_ms = Some(0);
+
+        let err = profile.validate().expect_err("should fail");
+        assert!(err
+            .to_string()
+            .contains("llm_script_timeout_ms must be > 0"));
     }
 }

@@ -42,6 +42,7 @@ pub fn registry_from_profile(profile: &RuntimeProfile) -> Result<PluginRegistry>
             Arc::new(ScriptLlmAdapter::new(
                 command.to_string(),
                 profile.llm_script_max_attempts,
+                profile.llm_script_timeout_ms,
             ))
         }
         other => bail!("unsupported llm adapter: {}", other),
@@ -76,6 +77,7 @@ mod tests {
             llm_model: "orchestrator-sim".to_string(),
             llm_script_command: None,
             llm_script_max_attempts: 1,
+            llm_script_timeout_ms: None,
             merge_auto_rework: false,
             max_merge_retries: 1,
             merge_rework_routes: crate::core::models::default_merge_rework_routes(),

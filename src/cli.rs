@@ -97,6 +97,8 @@ enum Commands {
         #[arg(long)]
         llm_script_max_attempts: Option<u32>,
         #[arg(long)]
+        llm_script_timeout_ms: Option<u64>,
+        #[arg(long)]
         enable_merge_auto_rework: bool,
         #[arg(long)]
         max_merge_retries: Option<u32>,
@@ -218,6 +220,7 @@ pub fn run() -> Result<()> {
             llm_model,
             llm_script_command,
             llm_script_max_attempts,
+            llm_script_timeout_ms,
             enable_merge_auto_rework,
             max_merge_retries,
             explain_routing,
@@ -231,6 +234,7 @@ pub fn run() -> Result<()> {
                 .with_llm_model(llm_model)
                 .with_llm_script_command(llm_script_command)
                 .with_llm_script_max_attempts(llm_script_max_attempts)
+                .with_llm_script_timeout_ms(llm_script_timeout_ms)
                 .with_merge_auto_rework(enable_merge_auto_rework)
                 .with_max_merge_retries(max_merge_retries)
                 .with_team_topology(team_topology)
