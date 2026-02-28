@@ -32,18 +32,22 @@ merge_rework_rules:
   - marker: "[[merge:code-conflict]]"
     route_key: code-conflict
     priority: 10
+    condition_mode: all
   - marker: "[[merge:api-conflict]]"
     route_key: api-conflict
     priority: 20
+    condition_mode: all
     required_risk_level: low
     min_retry_round: 1
     max_team_load: 5
   - marker: "[[merge:test-conflict]]"
     route_key: test-conflict
     priority: 30
+    condition_mode: all
   - marker: "[[merge:conflict]]"
     route_key: generic
     priority: 100
+    condition_mode: all
 role_failover: false
 max_role_attempts: 2
 team_topology: single

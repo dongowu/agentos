@@ -83,12 +83,18 @@ pub struct MergeReworkRule {
     pub marker: String,
     pub route_key: String,
     pub priority: u32,
+    #[serde(default = "default_condition_mode")]
+    pub condition_mode: String,
     #[serde(default)]
     pub required_risk_level: Option<String>,
     #[serde(default)]
     pub min_retry_round: Option<u32>,
     #[serde(default)]
     pub max_team_load: Option<usize>,
+}
+
+fn default_condition_mode() -> String {
+    "all".to_string()
 }
 
 pub fn default_merge_rework_routes() -> HashMap<String, MergeReworkRoute> {
@@ -142,6 +148,7 @@ pub fn default_merge_rework_rules() -> Vec<MergeReworkRule> {
             marker: "[[merge:code-conflict]]".to_string(),
             route_key: "code-conflict".to_string(),
             priority: 10,
+            condition_mode: default_condition_mode(),
             required_risk_level: None,
             min_retry_round: None,
             max_team_load: None,
@@ -150,6 +157,7 @@ pub fn default_merge_rework_rules() -> Vec<MergeReworkRule> {
             marker: "[[merge:api-conflict]]".to_string(),
             route_key: "api-conflict".to_string(),
             priority: 20,
+            condition_mode: default_condition_mode(),
             required_risk_level: None,
             min_retry_round: None,
             max_team_load: None,
@@ -158,6 +166,7 @@ pub fn default_merge_rework_rules() -> Vec<MergeReworkRule> {
             marker: "[[merge:test-conflict]]".to_string(),
             route_key: "test-conflict".to_string(),
             priority: 30,
+            condition_mode: default_condition_mode(),
             required_risk_level: None,
             min_retry_round: None,
             max_team_load: None,
@@ -166,6 +175,7 @@ pub fn default_merge_rework_rules() -> Vec<MergeReworkRule> {
             marker: "[[merge:conflict]]".to_string(),
             route_key: "generic".to_string(),
             priority: 100,
+            condition_mode: default_condition_mode(),
             required_risk_level: None,
             min_retry_round: None,
             max_team_load: None,
