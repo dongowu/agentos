@@ -126,6 +126,17 @@ impl RuntimeProfile {
             }
         }
 
+        let mut priorities: HashMap<u32, usize> = HashMap::new();
+        for rule in &self.merge_rework_rules {
+            *priorities.entry(rule.priority).or_insert(0) += 1;
+        }
+        if let Some((priority, _count)) = priorities.into_iter().find(|(_, count)| *count > 1) {
+            bail!(
+                "merge_rework_rules contains duplicate priority '{}' (priorities must be unique)",
+                priority
+            );
+        }
+
         Ok(())
     }
 
@@ -336,6 +347,14 @@ mod tests {
         profile.merge_rework_rules[0].condition_expression =
             Some("risk>=medium && retry>=1 || team_load<=3".to_string());
         profile.validate().expect("should pass");
+    }
+
+    #[test]
+    fn rejects_duplicate_rule_priorities() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[1].priority = profile.merge_rework_rules[0].priority;
+        let err = profile.validate().expect_err("should fail");
+        assert!(err.to_string().contains("duplicate priority"));
     }
 
     #[test]
