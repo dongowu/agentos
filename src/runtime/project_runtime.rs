@@ -2,8 +2,10 @@ use anyhow::Result;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::core::engine::run_company_flow;
-use crate::core::models::{GoalContract, MergeReworkRoute, ProjectReport};
+use crate::core::engine::{explain_merge_route_decision, run_company_flow};
+use crate::core::models::{
+    GoalContract, MergeReworkRoute, MergeReworkRule, MergeRouteExplanation, ProjectReport,
+};
 use crate::plugins::PluginRegistry;
 
 pub struct ProjectRuntime {
@@ -13,6 +15,7 @@ pub struct ProjectRuntime {
     merge_auto_rework: bool,
     max_merge_retries: u32,
     merge_rework_routes: HashMap<String, MergeReworkRoute>,
+    merge_rework_rules: Vec<MergeReworkRule>,
     role_failover: bool,
     max_role_attempts: usize,
 }
@@ -25,6 +28,7 @@ impl ProjectRuntime {
         merge_auto_rework: bool,
         max_merge_retries: u32,
         merge_rework_routes: HashMap<String, MergeReworkRoute>,
+        merge_rework_rules: Vec<MergeReworkRule>,
         role_failover: bool,
         max_role_attempts: usize,
     ) -> Self {
@@ -35,6 +39,7 @@ impl ProjectRuntime {
             merge_auto_rework,
             max_merge_retries,
             merge_rework_routes,
+            merge_rework_rules,
             role_failover,
             max_role_attempts,
         }
@@ -58,9 +63,85 @@ impl ProjectRuntime {
             self.merge_auto_rework,
             self.max_merge_retries,
             &self.merge_rework_routes,
+            &self.merge_rework_rules,
             self.role_failover,
             self.max_role_attempts,
             &self.plugins,
         )
+    }
+
+    pub fn explain_routing(&self, requirement: &str, retry_round: u32) -> MergeRouteExplanation {
+        explain_merge_route_decision(
+            requirement,
+            &[],
+            retry_round.max(1),
+            &self.merge_rework_routes,
+            &self.merge_rework_rules,
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProjectRuntime;
+    use crate::runtime::bootstrap::registry_from_profile;
+    use crate::runtime::profile::RuntimeProfile;
+
+    #[test]
+    fn explain_routing_returns_matched_rule() {
+        let profile = RuntimeProfile::default();
+        let runtime = ProjectRuntime::new(
+            registry_from_profile(&profile).expect("plugins"),
+            3,
+            1,
+            false,
+            1,
+            profile.merge_rework_routes.clone(),
+            profile.merge_rework_rules.clone(),
+            false,
+            2,
+        );
+
+        let explain = runtime.explain_routing("demo [[merge:api-conflict]]", 1);
+        assert_eq!(explain.max_risk_level, "unknown");
+        assert!(explain.team_loads.contains_key("api-conflict"));
+        assert_eq!(explain.selected_route.route_name, "api-conflict");
+        assert!(explain
+            .matched_rule
+            .as_ref()
+            .map(|rule| rule.route_key == "api-conflict")
+            .unwrap_or(false));
+    }
+
+    #[test]
+    fn explain_routing_reports_condition_failure_reason() {
+        let mut profile = RuntimeProfile::default();
+        if let Some(rule) = profile
+            .merge_rework_rules
+            .iter_mut()
+            .find(|rule| rule.route_key == "api-conflict")
+        {
+            rule.min_retry_round = Some(2);
+        }
+        let runtime = ProjectRuntime::new(
+            registry_from_profile(&profile).expect("plugins"),
+            3,
+            1,
+            false,
+            1,
+            profile.merge_rework_routes.clone(),
+            profile.merge_rework_rules.clone(),
+            false,
+            2,
+        );
+
+        let explain = runtime.explain_routing("demo [[merge:api-conflict]]", 1);
+        let api_check = explain
+            .checks
+            .iter()
+            .find(|check| check.route_key == "api-conflict")
+            .expect("api check");
+        assert!(!api_check.matched);
+        assert!(api_check.reason.contains("retry_round 1 < 2"));
     }
 }

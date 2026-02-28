@@ -465,20 +465,12 @@ fn has_merge_conflict_marker(requirement: &str) -> bool {
 }
 
 fn has_expected_rework_evidence(reports: &[TaskReport], requirement: &str) -> bool {
-    let expected_suffix = if requirement.contains("[[merge:code-conflict]]") {
-        "code"
-    } else if requirement.contains("[[merge:api-conflict]]") {
-        "api"
-    } else if requirement.contains("[[merge:test-conflict]]") {
-        "test"
-    } else {
-        "generic"
-    };
-
     reports.iter().any(|report| {
-        report
-            .task_id
-            .starts_with(&format!("merge_rework_{}", expected_suffix))
+        report.task_id.starts_with("merge_rework_")
+            && (requirement.contains("[[merge:conflict]]")
+                || requirement.contains("[[merge:code-conflict]]")
+                || requirement.contains("[[merge:api-conflict]]")
+                || requirement.contains("[[merge:test-conflict]]"))
     })
 }
 

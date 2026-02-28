@@ -2,10 +2,12 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::core::models::{default_merge_rework_routes, MergeReworkRoute};
+use crate::core::models::{
+    default_merge_rework_routes, default_merge_rework_rules, MergeReworkRoute, MergeReworkRule,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeProfile {
@@ -21,6 +23,8 @@ pub struct RuntimeProfile {
     pub max_merge_retries: u32,
     #[serde(default = "default_routes")]
     pub merge_rework_routes: HashMap<String, MergeReworkRoute>,
+    #[serde(default = "default_rules")]
+    pub merge_rework_rules: Vec<MergeReworkRule>,
     #[serde(default)]
     pub role_failover: bool,
     #[serde(default = "default_max_role_attempts")]
@@ -53,6 +57,10 @@ fn default_routes() -> HashMap<String, MergeReworkRoute> {
     default_merge_rework_routes()
 }
 
+fn default_rules() -> Vec<MergeReworkRule> {
+    default_merge_rework_rules()
+}
+
 fn default_max_role_attempts() -> usize {
     2
 }
@@ -74,6 +82,7 @@ impl Default for RuntimeProfile {
             merge_auto_rework: false,
             max_merge_retries: default_max_merge_retries(),
             merge_rework_routes: default_routes(),
+            merge_rework_rules: default_rules(),
             role_failover: false,
             max_role_attempts: default_max_role_attempts(),
             role_instances: HashMap::new(),
@@ -84,15 +93,74 @@ impl Default for RuntimeProfile {
 }
 
 impl RuntimeProfile {
+    fn validate(&self) -> Result<()> {
+        if !self.merge_rework_routes.contains_key("generic") {
+            bail!("merge_rework_routes must define a 'generic' route");
+        }
+
+        for rule in &self.merge_rework_rules {
+            if !rule.condition_mode.eq_ignore_ascii_case("all")
+                && !rule.condition_mode.eq_ignore_ascii_case("any")
+            {
+                bail!(
+                    "invalid condition_mode '{}' for route_key '{}' (expected 'all' or 'any')",
+                    rule.condition_mode,
+                    rule.route_key
+                );
+            }
+
+            if !self.merge_rework_routes.contains_key(&rule.route_key) {
+                bail!(
+                    "merge_rework_rules references unknown route_key '{}'",
+                    rule.route_key
+                );
+            }
+
+            if let Some(required) = rule.required_risk_level.as_ref() {
+                validate_risk_level(required).with_context(|| {
+                    format!(
+                        "invalid required_risk_level for route_key '{}': {}",
+                        rule.route_key, required
+                    )
+                })?;
+            }
+
+            if let Some(expression) = rule.condition_expression.as_ref() {
+                validate_condition_expression(expression).with_context(|| {
+                    format!(
+                        "invalid condition_expression for route_key '{}': {}",
+                        rule.route_key, expression
+                    )
+                })?;
+            }
+        }
+
+        let mut priorities: HashMap<u32, usize> = HashMap::new();
+        for rule in &self.merge_rework_rules {
+            *priorities.entry(rule.priority).or_insert(0) += 1;
+        }
+        if let Some((priority, _count)) = priorities.into_iter().find(|(_, count)| *count > 1) {
+            bail!(
+                "merge_rework_rules contains duplicate priority '{}' (priorities must be unique)",
+                priority
+            );
+        }
+
+        Ok(())
+    }
+
     pub fn load(path: Option<&Path>) -> Result<Self> {
         if let Some(path) = path {
             let raw = fs::read_to_string(path)
                 .with_context(|| format!("failed to read runtime profile {}", path.display()))?;
             let parsed = serde_yaml::from_str::<RuntimeProfile>(&raw)
                 .with_context(|| format!("failed to parse runtime profile {}", path.display()))?;
+            parsed.validate()?;
             return Ok(parsed);
         }
-        Ok(Self::default())
+        let profile = Self::default();
+        profile.validate()?;
+        Ok(profile)
     }
 
     pub fn with_gate_policy(mut self, policy: Option<String>) -> Self {
@@ -156,5 +224,179 @@ impl RuntimeProfile {
             self.max_parallel_teams = max_parallel_teams.max(1);
         }
         self
+    }
+}
+
+fn validate_condition_expression(expression: &str) -> Result<()> {
+    let branches: Vec<&str> = expression
+        .split("||")
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty())
+        .collect();
+
+    if branches.is_empty() {
+        bail!("expression must contain at least one branch");
+    }
+
+    for branch in branches {
+        let atoms: Vec<&str> = branch
+            .split("&&")
+            .map(str::trim)
+            .filter(|atom| !atom.is_empty())
+            .collect();
+        if atoms.is_empty() {
+            bail!("branch must contain at least one condition atom");
+        }
+        for atom in atoms {
+            validate_condition_atom(atom)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_condition_atom(atom: &str) -> Result<()> {
+    if let Some(value) = atom.strip_prefix("risk==") {
+        return validate_risk_level(value.trim());
+    }
+
+    if let Some(value) = atom.strip_prefix("risk>=") {
+        return validate_risk_level(value.trim());
+    }
+
+    if let Some(value) = atom.strip_prefix("risk<=") {
+        return validate_risk_level(value.trim());
+    }
+
+    if let Some(value) = atom.strip_prefix("retry>=") {
+        value
+            .trim()
+            .parse::<u32>()
+            .with_context(|| format!("invalid retry bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
+    if let Some(value) = atom.strip_prefix("retry<=") {
+        value
+            .trim()
+            .parse::<u32>()
+            .with_context(|| format!("invalid retry bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
+    if let Some(value) = atom.strip_prefix("retry==") {
+        value
+            .trim()
+            .parse::<u32>()
+            .with_context(|| format!("invalid retry bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
+    if let Some(value) = atom.strip_prefix("team_load<=") {
+        value
+            .trim()
+            .parse::<usize>()
+            .with_context(|| format!("invalid team_load bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
+    if let Some(value) = atom.strip_prefix("team_load>=") {
+        value
+            .trim()
+            .parse::<usize>()
+            .with_context(|| format!("invalid team_load bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
+    if let Some(value) = atom.strip_prefix("team_load==") {
+        value
+            .trim()
+            .parse::<usize>()
+            .with_context(|| format!("invalid team_load bound '{}'", value.trim()))?;
+        return Ok(());
+    }
+
+    bail!("unsupported condition atom '{}'", atom)
+}
+
+fn validate_risk_level(level: &str) -> Result<()> {
+    let normalized = level.trim().to_ascii_lowercase();
+    if normalized == "low" || normalized == "medium" || normalized == "high" {
+        return Ok(());
+    }
+    bail!("unsupported risk level '{}'", level)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RuntimeProfile;
+
+    #[test]
+    fn rejects_unknown_condition_mode() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_mode = "xor".to_string();
+        let err = profile.validate().expect_err("should fail");
+        assert!(err.to_string().contains("invalid condition_mode"));
+    }
+
+    #[test]
+    fn rejects_rule_with_unknown_route_key() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].route_key = "missing-route".to_string();
+        let err = profile.validate().expect_err("should fail");
+        assert!(err.to_string().contains("unknown route_key"));
+    }
+
+    #[test]
+    fn accepts_uppercase_condition_mode() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_mode = "ANY".to_string();
+        profile.validate().expect("should pass");
+    }
+
+    #[test]
+    fn rejects_invalid_condition_expression_atom() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_expression = Some("foo==bar".to_string());
+        let err = profile.validate().expect_err("should fail");
+        assert!(err.to_string().contains("invalid condition_expression"));
+    }
+
+    #[test]
+    fn accepts_valid_condition_expression() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_expression =
+            Some("risk>=medium && retry>=1 || team_load<=3".to_string());
+        profile.validate().expect("should pass");
+    }
+
+    #[test]
+    fn accepts_retry_equal_and_team_load_equal_expression() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_expression =
+            Some("retry==1 && team_load==2".to_string());
+        profile.validate().expect("should pass");
+    }
+
+    #[test]
+    fn rejects_duplicate_rule_priorities() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[1].priority = profile.merge_rework_rules[0].priority;
+        let err = profile.validate().expect_err("should fail");
+        assert!(err.to_string().contains("duplicate priority"));
+    }
+
+    #[test]
+    fn accepts_risk_equal_expression() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_expression = Some("risk==low".to_string());
+        profile.validate().expect("should pass");
+    }
+
+    #[test]
+    fn accepts_case_insensitive_required_risk_level() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].required_risk_level = Some("HIGH".to_string());
+        profile.validate().expect("should pass");
     }
 }

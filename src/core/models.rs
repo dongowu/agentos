@@ -70,12 +70,59 @@ pub struct MergeOutcome {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeRuleCheck {
+    pub route_key: String,
+    pub marker: String,
+    pub priority: u32,
+    pub enabled: bool,
+    pub matched: bool,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeRouteExplanation {
+    pub retry_round: u32,
+    pub max_risk_level: String,
+    pub team_loads: HashMap<String, usize>,
+    pub selected_route: MergeReworkRoute,
+    pub matched_rule: Option<MergeReworkRule>,
+    pub checks: Vec<MergeRuleCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeReworkRoute {
     pub route_name: String,
     pub task_suffix: String,
     pub team_id: String,
     pub role: String,
     pub actor_summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeReworkRule {
+    pub marker: String,
+    pub route_key: String,
+    pub priority: u32,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_condition_mode")]
+    pub condition_mode: String,
+    #[serde(default)]
+    pub required_risk_level: Option<String>,
+    #[serde(default)]
+    pub min_retry_round: Option<u32>,
+    #[serde(default)]
+    pub max_team_load: Option<usize>,
+    #[serde(default)]
+    pub condition_expression: Option<String>,
+}
+
+fn default_condition_mode() -> String {
+    "all".to_string()
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 pub fn default_merge_rework_routes() -> HashMap<String, MergeReworkRoute> {
@@ -121,6 +168,55 @@ pub fn default_merge_rework_routes() -> HashMap<String, MergeReworkRoute> {
             },
         ),
     ])
+}
+
+pub fn default_merge_rework_rules() -> Vec<MergeReworkRule> {
+    vec![
+        MergeReworkRule {
+            marker: "[[merge:code-conflict]]".to_string(),
+            route_key: "code-conflict".to_string(),
+            priority: 10,
+            enabled: default_enabled(),
+            condition_mode: default_condition_mode(),
+            required_risk_level: None,
+            min_retry_round: None,
+            max_team_load: None,
+            condition_expression: None,
+        },
+        MergeReworkRule {
+            marker: "[[merge:api-conflict]]".to_string(),
+            route_key: "api-conflict".to_string(),
+            priority: 20,
+            enabled: default_enabled(),
+            condition_mode: default_condition_mode(),
+            required_risk_level: None,
+            min_retry_round: None,
+            max_team_load: None,
+            condition_expression: None,
+        },
+        MergeReworkRule {
+            marker: "[[merge:test-conflict]]".to_string(),
+            route_key: "test-conflict".to_string(),
+            priority: 30,
+            enabled: default_enabled(),
+            condition_mode: default_condition_mode(),
+            required_risk_level: None,
+            min_retry_round: None,
+            max_team_load: None,
+            condition_expression: None,
+        },
+        MergeReworkRule {
+            marker: "[[merge:conflict]]".to_string(),
+            route_key: "generic".to_string(),
+            priority: 100,
+            enabled: default_enabled(),
+            condition_mode: default_condition_mode(),
+            required_risk_level: None,
+            min_retry_round: None,
+            max_team_load: None,
+            condition_expression: None,
+        },
+    ]
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
