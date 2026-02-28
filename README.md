@@ -89,6 +89,9 @@ cargo run -- team-run "交付一个用户登录系统" --team-topology multi --m
 # 合并冲突自动回滚+重试编排
 cargo run -- team-run "交付一个用户登录系统 [[merge:conflict]]" --team-topology multi --merge-policy strict --enable-merge-auto-rework --max-merge-retries 2
 
+# 按冲突类型路由自动修复子流程
+cargo run -- team-run "交付一个用户登录系统 [[merge:api-conflict]]" --team-topology multi --merge-policy strict --enable-merge-auto-rework
+
 # 启用多团队拓扑（跨团队并行收敛）
 cargo run -- team-run "交付一个用户登录系统" --team-topology multi --max-parallel 4 --max-parallel-teams 2
 
@@ -106,6 +109,7 @@ cargo run -- team-run "交付一个用户登录系统" --profile-file config/tea
 - 冲突处理：`two_round` / `immediate_escalation`
 - 跨团队合并：`strict` / `fast`
 - 合并自愈：`--enable-merge-auto-rework` + `--max-merge-retries`
+- 冲突路由标记：`[[merge:code-conflict]]` / `[[merge:api-conflict]]` / `[[merge:test-conflict]]`
 - 角色管理：`--enable-role-failover` + `--max-role-attempts`（或 profile 中配置）
 - 团队管理：`--team-topology single|multi` + `--max-parallel-teams`
 - 策略可通过 `--gate-policy`、`--arbiter-policy`、`--merge-policy` 或 `--profile-file` 动态切换

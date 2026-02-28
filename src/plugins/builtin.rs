@@ -423,11 +423,8 @@ impl MergePolicy for StrictMergePolicy {
             };
         }
 
-        if requirement.contains("[[merge:conflict]]") {
-            if reports
-                .iter()
-                .any(|report| report.task_id.starts_with("merge_rework_"))
-            {
+        if has_merge_conflict_marker(requirement) {
+            if has_expected_rework_evidence(reports, requirement) {
                 return MergeOutcome {
                     approved: true,
                     attempts: 2,
@@ -458,6 +455,29 @@ impl MergePolicy for StrictMergePolicy {
             escalated_to_human: false,
         }
     }
+}
+
+fn has_merge_conflict_marker(requirement: &str) -> bool {
+    requirement.contains("[[merge:conflict]]")
+        || requirement.contains("[[merge:code-conflict]]")
+        || requirement.contains("[[merge:api-conflict]]")
+        || requirement.contains("[[merge:test-conflict]]")
+}
+
+fn has_expected_rework_evidence(reports: &[TaskReport], requirement: &str) -> bool {
+    let expected_team = if requirement.contains("[[merge:code-conflict]]") {
+        "platform_team"
+    } else if requirement.contains("[[merge:api-conflict]]") {
+        "feature_team"
+    } else if requirement.contains("[[merge:test-conflict]]") {
+        "qa_team"
+    } else {
+        "program_board"
+    };
+
+    reports.iter().any(|report| {
+        report.task_id.starts_with("merge_rework_") && report.team_id == expected_team
+    })
 }
 
 pub struct FastMergePolicy;

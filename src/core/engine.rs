@@ -340,22 +340,27 @@ fn evaluate_merge_with_auto_rework(
         return outcome;
     }
 
+    let route = detect_merge_rework_route(requirement);
     let max_retries = max_merge_retries.max(1);
     for retry in 1..=max_retries {
         trace.push(format!(
-            "merge auto-rework round {}: rollback to last checkpoint and regenerate conflicted outputs",
-            retry
+            "merge auto-rework round {} ({}) : rollback to last checkpoint and regenerate conflicted outputs",
+            retry,
+            route.route_name
         ));
         reports.push(TaskReport {
-            task_id: format!("merge_rework_{}", retry),
-            team_id: "program_board".to_string(),
-            role: "supervisor@supervisor.primary".to_string(),
+            task_id: format!("merge_rework_{}_{}", route.task_suffix, retry),
+            team_id: route.team_id.to_string(),
+            role: route.role.to_string(),
             summary: format!(
-                "supervisor executed merge rework round {} for cross-team convergence",
-                retry
+                "{} executed merge rework round {} for cross-team convergence",
+                route.actor_summary, retry
             ),
             risk_level: "medium".to_string(),
-            artifacts: vec![format!("artifacts/merge/rework-round-{}.md", retry)],
+            artifacts: vec![format!(
+                "artifacts/merge/{}/rework-round-{}.md",
+                route.task_suffix, retry
+            )],
         });
 
         outcome = evaluate_merge(requirement, reports, plugins, trace);
@@ -365,6 +370,54 @@ fn evaluate_merge_with_auto_rework(
     }
 
     outcome
+}
+
+struct MergeReworkRoute {
+    route_name: &'static str,
+    task_suffix: &'static str,
+    team_id: &'static str,
+    role: &'static str,
+    actor_summary: &'static str,
+}
+
+fn detect_merge_rework_route(requirement: &str) -> MergeReworkRoute {
+    if requirement.contains("[[merge:code-conflict]]") {
+        return MergeReworkRoute {
+            route_name: "code-conflict",
+            task_suffix: "code",
+            team_id: "platform_team",
+            role: "architect@architect.primary",
+            actor_summary: "platform architect",
+        };
+    }
+
+    if requirement.contains("[[merge:api-conflict]]") {
+        return MergeReworkRoute {
+            route_name: "api-conflict",
+            task_suffix: "api",
+            team_id: "feature_team",
+            role: "architect@architect.primary",
+            actor_summary: "feature architect",
+        };
+    }
+
+    if requirement.contains("[[merge:test-conflict]]") {
+        return MergeReworkRoute {
+            route_name: "test-conflict",
+            task_suffix: "test",
+            team_id: "qa_team",
+            role: "tester@tester.primary",
+            actor_summary: "qa lead",
+        };
+    }
+
+    MergeReworkRoute {
+        route_name: "generic",
+        task_suffix: "generic",
+        team_id: "program_board",
+        role: "supervisor@supervisor.primary",
+        actor_summary: "supervisor",
+    }
 }
 
 #[cfg(test)]
@@ -568,5 +621,36 @@ mod tests {
             .trace
             .iter()
             .any(|line| line.contains("merge auto-rework round 1")));
+    }
+
+    #[test]
+    fn company_flow_routes_api_conflict_rework_to_feature_team() {
+        let mut profile = RuntimeProfile::default();
+        profile.team_topology = "multi".to_string();
+        profile.merge_policy = "strict".to_string();
+        let plugins = registry_from_profile(&profile).expect("plugins");
+        let goal = GoalContract {
+            goal_id: "goal_test_8".to_string(),
+            objective: "ship feature [[merge:api-conflict]]".to_string(),
+            acceptance_criteria: vec!["tests pass".to_string()],
+        };
+
+        let report = run_company_flow(
+            "ship feature [[merge:api-conflict]]",
+            goal,
+            4,
+            2,
+            true,
+            2,
+            false,
+            2,
+            &plugins,
+        )
+        .expect("report");
+        assert_eq!(report.status, ProjectStatus::Completed);
+        assert!(report
+            .tasks
+            .iter()
+            .any(|task| task.task_id == "merge_rework_api_1" && task.team_id == "feature_team"));
     }
 }
