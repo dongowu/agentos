@@ -256,6 +256,10 @@ fn validate_condition_expression(expression: &str) -> Result<()> {
 }
 
 fn validate_condition_atom(atom: &str) -> Result<()> {
+    if atom.eq_ignore_ascii_case("true") || atom.eq_ignore_ascii_case("false") {
+        return Ok(());
+    }
+
     if let Some(inner) = atom.strip_prefix('!') {
         if inner.trim().is_empty() {
             bail!("unsupported condition atom '{}'", atom);
@@ -411,6 +415,13 @@ mod tests {
     fn accepts_negated_expression_atom() {
         let mut profile = RuntimeProfile::default();
         profile.merge_rework_rules[0].condition_expression = Some("!risk==high".to_string());
+        profile.validate().expect("should pass");
+    }
+
+    #[test]
+    fn accepts_boolean_literal_expression() {
+        let mut profile = RuntimeProfile::default();
+        profile.merge_rework_rules[0].condition_expression = Some("true && !false".to_string());
         profile.validate().expect("should pass");
     }
 }
