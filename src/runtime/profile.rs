@@ -17,6 +17,12 @@ pub struct RuntimeProfile {
     pub arbiter_policy: String,
     #[serde(default = "default_merge_policy")]
     pub merge_policy: String,
+    #[serde(default = "default_llm_adapter")]
+    pub llm_adapter: String,
+    #[serde(default = "default_llm_model")]
+    pub llm_model: String,
+    #[serde(default)]
+    pub llm_script_command: Option<String>,
     #[serde(default)]
     pub merge_auto_rework: bool,
     #[serde(default = "default_max_merge_retries")]
@@ -49,6 +55,14 @@ fn default_merge_policy() -> String {
     "strict".to_string()
 }
 
+fn default_llm_adapter() -> String {
+    "mock".to_string()
+}
+
+fn default_llm_model() -> String {
+    "orchestrator-sim".to_string()
+}
+
 fn default_max_merge_retries() -> u32 {
     1
 }
@@ -79,6 +93,9 @@ impl Default for RuntimeProfile {
             gate_policy: default_gate_policy(),
             arbiter_policy: default_arbiter_policy(),
             merge_policy: default_merge_policy(),
+            llm_adapter: default_llm_adapter(),
+            llm_model: default_llm_model(),
+            llm_script_command: None,
             merge_auto_rework: false,
             max_merge_retries: default_max_merge_retries(),
             merge_rework_routes: default_routes(),
@@ -96,6 +113,24 @@ impl RuntimeProfile {
     fn validate(&self) -> Result<()> {
         if !self.merge_rework_routes.contains_key("generic") {
             bail!("merge_rework_routes must define a 'generic' route");
+        }
+
+        if self.llm_adapter != "mock" && self.llm_adapter != "script" {
+            bail!(
+                "invalid llm_adapter '{}' (expected 'mock' or 'script')",
+                self.llm_adapter
+            );
+        }
+
+        if self.llm_adapter == "script" {
+            let command = self
+                .llm_script_command
+                .as_ref()
+                .map(|value| value.trim())
+                .unwrap_or("");
+            if command.is_empty() {
+                bail!("llm_script_command is required when llm_adapter='script'");
+            }
         }
 
         for rule in &self.merge_rework_rules {
@@ -180,6 +215,27 @@ impl RuntimeProfile {
     pub fn with_merge_policy(mut self, policy: Option<String>) -> Self {
         if let Some(policy) = policy {
             self.merge_policy = policy;
+        }
+        self
+    }
+
+    pub fn with_llm_adapter(mut self, adapter: Option<String>) -> Self {
+        if let Some(adapter) = adapter {
+            self.llm_adapter = adapter;
+        }
+        self
+    }
+
+    pub fn with_llm_model(mut self, model: Option<String>) -> Self {
+        if let Some(model) = model {
+            self.llm_model = model;
+        }
+        self
+    }
+
+    pub fn with_llm_script_command(mut self, command: Option<String>) -> Self {
+        if let Some(command) = command {
+            self.llm_script_command = Some(command);
         }
         self
     }
@@ -661,5 +717,21 @@ mod tests {
         profile.merge_rework_rules[0].condition_expression = Some("(risk==low".to_string());
         let err = profile.validate().expect_err("should fail");
         assert!(err.to_string().contains("invalid condition_expression"));
+    }
+
+    #[test]
+    fn rejects_unknown_llm_adapter() {
+        let mut profile = RuntimeProfile::default();
+        profile.llm_adapter = "other".to_string();
+        let err = profile.validate().expect_err("should fail");
+        assert!(err.to_string().contains("invalid llm_adapter"));
+    }
+
+    #[test]
+    fn requires_script_command_for_script_adapter() {
+        let mut profile = RuntimeProfile::default();
+        profile.llm_adapter = "script".to_string();
+        let err = profile.validate().expect_err("should fail");
+        assert!(err.to_string().contains("llm_script_command is required"));
     }
 }

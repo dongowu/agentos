@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use anyhow::Result;
@@ -6,6 +7,7 @@ use anyhow::Result;
 use crate::core::models::{
     Department, GateId, GateVote, GoalContract, MergeOutcome, TaskNode, TaskReport,
 };
+use crate::llm::{LlmAdapter, LlmRequest};
 use crate::plugins::{
     ArbiterDecision, ArbiterPolicy, GatePolicy, MergePolicy, RiskPolicy, RoleExecution,
     RoleProvider, TeamStrategy,
@@ -13,10 +15,16 @@ use crate::plugins::{
 
 pub struct BuiltinRoleProvider {
     role_instances: HashMap<String, Vec<String>>,
+    llm_adapter: Arc<dyn LlmAdapter>,
+    llm_model: String,
 }
 
 impl BuiltinRoleProvider {
-    pub fn from_overrides(overrides: HashMap<String, Vec<String>>) -> Self {
+    pub fn from_overrides(
+        overrides: HashMap<String, Vec<String>>,
+        llm_adapter: Arc<dyn LlmAdapter>,
+        llm_model: String,
+    ) -> Self {
         let mut role_instances = HashMap::from([
             (
                 "product_lead".to_string(),
@@ -46,7 +54,11 @@ impl BuiltinRoleProvider {
         for (role, instances) in overrides {
             role_instances.insert(role, instances);
         }
-        Self { role_instances }
+        Self {
+            role_instances,
+            llm_adapter,
+            llm_model,
+        }
     }
 }
 
@@ -73,10 +85,16 @@ impl RoleProvider for BuiltinRoleProvider {
                 role
             ));
         }
-        let summary = format!(
-            "{} ({}) completed '{}' for goal {}",
-            role, instance_id, task.title, goal.goal_id
-        );
+        let llm_request = LlmRequest {
+            role: role.to_string(),
+            instance_id: instance_id.to_string(),
+            task_id: task.id.clone(),
+            task_title: task.title.clone(),
+            goal_id: goal.goal_id.clone(),
+            objective: goal.objective.clone(),
+            model: self.llm_model.clone(),
+        };
+        let summary = self.llm_adapter.generate_summary(&llm_request)?;
         let artifacts = vec![format!("artifacts/{}/{}.md", task.id, instance_id)];
         Ok(RoleExecution {
             instance_id: instance_id.to_string(),
