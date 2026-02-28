@@ -84,7 +84,7 @@ cargo run -- team-run "交付一个用户登录系统" --max-parallel 3
 cargo run -- team-run "交付一个用户登录系统" --gate-policy majority --arbiter-policy immediate_escalation
 
 # 切换 LLM 适配器（mock 或 script）
-cargo run -- team-run "交付一个用户登录系统" --llm-adapter script --llm-model gpt-4.1 --llm-script-command "printf '%s (%s)' \"$ORCH_TASK_TITLE\" \"$ORCH_MODEL\""
+cargo run -- team-run "交付一个用户登录系统" --llm-adapter script --llm-model gpt-4.1 --llm-script-command "printf '%s (%s)' \"$ORCH_TASK_TITLE\" \"$ORCH_MODEL\"" --llm-script-max-attempts 2
 
 # 切换跨团队合并策略
 cargo run -- team-run "交付一个用户登录系统" --team-topology multi --merge-policy fast
@@ -114,6 +114,7 @@ cargo run -- team-run "交付一个用户登录系统" --profile-file config/tea
 - 5 部门 Board：Product / Engineering / QA / Security / Ops
 - 4 个 Gate：Intake / Freeze / Release / Closure
 - LLM adapter：`mock` / `script`（script 通过 `--llm-script-command` 接入外部模型网关）
+- 脚本重试：`--llm-script-max-attempts`（默认 `1`，仅 script adapter 生效）
 - Gate 规则：`unanimous` / `majority`
 - 冲突处理：`two_round` / `immediate_escalation`
 - 跨团队合并：`strict` / `fast`

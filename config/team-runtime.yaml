@@ -3,6 +3,7 @@ arbiter_policy: two_round
 merge_policy: strict
 llm_adapter: mock
 llm_model: orchestrator-sim
+llm_script_max_attempts: 1
 merge_auto_rework: false
 max_merge_retries: 1
 merge_rework_routes:

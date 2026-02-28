@@ -23,6 +23,8 @@ pub struct RuntimeProfile {
     pub llm_model: String,
     #[serde(default)]
     pub llm_script_command: Option<String>,
+    #[serde(default = "default_llm_script_max_attempts")]
+    pub llm_script_max_attempts: u32,
     #[serde(default)]
     pub merge_auto_rework: bool,
     #[serde(default = "default_max_merge_retries")]
@@ -67,6 +69,10 @@ fn default_max_merge_retries() -> u32 {
     1
 }
 
+fn default_llm_script_max_attempts() -> u32 {
+    1
+}
+
 fn default_routes() -> HashMap<String, MergeReworkRoute> {
     default_merge_rework_routes()
 }
@@ -96,6 +102,7 @@ impl Default for RuntimeProfile {
             llm_adapter: default_llm_adapter(),
             llm_model: default_llm_model(),
             llm_script_command: None,
+            llm_script_max_attempts: default_llm_script_max_attempts(),
             merge_auto_rework: false,
             max_merge_retries: default_max_merge_retries(),
             merge_rework_routes: default_routes(),
@@ -130,6 +137,10 @@ impl RuntimeProfile {
                 .unwrap_or("");
             if command.is_empty() {
                 bail!("llm_script_command is required when llm_adapter='script'");
+            }
+
+            if self.llm_script_max_attempts == 0 {
+                bail!("llm_script_max_attempts must be >= 1 when llm_adapter='script'");
             }
         }
 
@@ -236,6 +247,13 @@ impl RuntimeProfile {
     pub fn with_llm_script_command(mut self, command: Option<String>) -> Self {
         if let Some(command) = command {
             self.llm_script_command = Some(command);
+        }
+        self
+    }
+
+    pub fn with_llm_script_max_attempts(mut self, max_attempts: Option<u32>) -> Self {
+        if let Some(max_attempts) = max_attempts {
+            self.llm_script_max_attempts = max_attempts.max(1);
         }
         self
     }
@@ -733,5 +751,18 @@ mod tests {
         profile.llm_adapter = "script".to_string();
         let err = profile.validate().expect_err("should fail");
         assert!(err.to_string().contains("llm_script_command is required"));
+    }
+
+    #[test]
+    fn rejects_zero_script_max_attempts_for_script_adapter() {
+        let mut profile = RuntimeProfile::default();
+        profile.llm_adapter = "script".to_string();
+        profile.llm_script_command = Some("printf ok".to_string());
+        profile.llm_script_max_attempts = 0;
+
+        let err = profile.validate().expect_err("should fail");
+        assert!(err
+            .to_string()
+            .contains("llm_script_max_attempts must be >= 1"));
     }
 }
