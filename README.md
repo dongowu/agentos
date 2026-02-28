@@ -110,6 +110,7 @@ cargo run -- team-run "交付一个用户登录系统" --profile-file config/tea
 - 跨团队合并：`strict` / `fast`
 - 合并自愈：`--enable-merge-auto-rework` + `--max-merge-retries`
 - 冲突路由标记：`[[merge:code-conflict]]` / `[[merge:api-conflict]]` / `[[merge:test-conflict]]`
+- 冲突路由映射：可在 `config/team-runtime.yaml` 的 `merge_rework_routes` 自定义 team/role 路径
 - 角色管理：`--enable-role-failover` + `--max-role-attempts`（或 profile 中配置）
 - 团队管理：`--team-topology single|multi` + `--max-parallel-teams`
 - 策略可通过 `--gate-policy`、`--arbiter-policy`、`--merge-policy` 或 `--profile-file` 动态切换

@@ -1,8 +1,9 @@
 use anyhow::Result;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::core::engine::run_company_flow;
-use crate::core::models::{GoalContract, ProjectReport};
+use crate::core::models::{GoalContract, MergeReworkRoute, ProjectReport};
 use crate::plugins::PluginRegistry;
 
 pub struct ProjectRuntime {
@@ -11,6 +12,7 @@ pub struct ProjectRuntime {
     max_parallel_teams: usize,
     merge_auto_rework: bool,
     max_merge_retries: u32,
+    merge_rework_routes: HashMap<String, MergeReworkRoute>,
     role_failover: bool,
     max_role_attempts: usize,
 }
@@ -22,6 +24,7 @@ impl ProjectRuntime {
         max_parallel_teams: usize,
         merge_auto_rework: bool,
         max_merge_retries: u32,
+        merge_rework_routes: HashMap<String, MergeReworkRoute>,
         role_failover: bool,
         max_role_attempts: usize,
     ) -> Self {
@@ -31,6 +34,7 @@ impl ProjectRuntime {
             max_parallel_teams,
             merge_auto_rework,
             max_merge_retries,
+            merge_rework_routes,
             role_failover,
             max_role_attempts,
         }
@@ -53,6 +57,7 @@ impl ProjectRuntime {
             self.max_parallel_teams,
             self.merge_auto_rework,
             self.max_merge_retries,
+            &self.merge_rework_routes,
             self.role_failover,
             self.max_role_attempts,
             &self.plugins,

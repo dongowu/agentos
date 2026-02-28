@@ -52,6 +52,7 @@ mod tests {
             merge_policy: "strict".to_string(),
             merge_auto_rework: false,
             max_merge_retries: 1,
+            merge_rework_routes: crate::core::models::default_merge_rework_routes(),
             role_failover: false,
             max_role_attempts: 2,
             role_instances: Default::default(),

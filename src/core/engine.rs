@@ -1,10 +1,11 @@
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 use anyhow::{anyhow, Result};
 
 use crate::core::models::{
-    GateId, GateOutcome, GoalContract, MergeOutcome, ProjectReport, ProjectStatus, TaskNode,
-    TaskReport,
+    GateId, GateOutcome, GoalContract, MergeOutcome, MergeReworkRoute, ProjectReport,
+    ProjectStatus, TaskNode, TaskReport,
 };
 use crate::core::scheduler::next_runnable;
 use crate::core::trace::TraceLog;
@@ -17,6 +18,7 @@ pub fn run_company_flow(
     max_parallel_teams: usize,
     merge_auto_rework: bool,
     max_merge_retries: u32,
+    merge_rework_routes: &HashMap<String, MergeReworkRoute>,
     role_failover: bool,
     max_role_attempts: usize,
     plugins: &PluginRegistry,
@@ -181,6 +183,7 @@ pub fn run_company_flow(
                 &mut trace,
                 merge_auto_rework,
                 max_merge_retries,
+                merge_rework_routes,
             );
             if !outcome.approved {
                 merge_outcome = Some(outcome);
@@ -334,13 +337,14 @@ fn evaluate_merge_with_auto_rework(
     trace: &mut TraceLog,
     merge_auto_rework: bool,
     max_merge_retries: u32,
+    merge_rework_routes: &HashMap<String, MergeReworkRoute>,
 ) -> MergeOutcome {
     let mut outcome = evaluate_merge(requirement, reports, plugins, trace);
     if outcome.approved || !merge_auto_rework {
         return outcome;
     }
 
-    let route = detect_merge_rework_route(requirement);
+    let route = detect_merge_rework_route(requirement, merge_rework_routes);
     let max_retries = max_merge_retries.max(1);
     for retry in 1..=max_retries {
         trace.push(format!(
@@ -350,8 +354,8 @@ fn evaluate_merge_with_auto_rework(
         ));
         reports.push(TaskReport {
             task_id: format!("merge_rework_{}_{}", route.task_suffix, retry),
-            team_id: route.team_id.to_string(),
-            role: route.role.to_string(),
+            team_id: route.team_id.clone(),
+            role: route.role.clone(),
             summary: format!(
                 "{} executed merge rework round {} for cross-team convergence",
                 route.actor_summary, retry
@@ -372,52 +376,31 @@ fn evaluate_merge_with_auto_rework(
     outcome
 }
 
-struct MergeReworkRoute {
-    route_name: &'static str,
-    task_suffix: &'static str,
-    team_id: &'static str,
-    role: &'static str,
-    actor_summary: &'static str,
-}
+fn detect_merge_rework_route(
+    requirement: &str,
+    routes: &HashMap<String, MergeReworkRoute>,
+) -> MergeReworkRoute {
+    let key = if requirement.contains("[[merge:code-conflict]]") {
+        "code-conflict"
+    } else if requirement.contains("[[merge:api-conflict]]") {
+        "api-conflict"
+    } else if requirement.contains("[[merge:test-conflict]]") {
+        "test-conflict"
+    } else {
+        "generic"
+    };
 
-fn detect_merge_rework_route(requirement: &str) -> MergeReworkRoute {
-    if requirement.contains("[[merge:code-conflict]]") {
-        return MergeReworkRoute {
-            route_name: "code-conflict",
-            task_suffix: "code",
-            team_id: "platform_team",
-            role: "architect@architect.primary",
-            actor_summary: "platform architect",
-        };
-    }
-
-    if requirement.contains("[[merge:api-conflict]]") {
-        return MergeReworkRoute {
-            route_name: "api-conflict",
-            task_suffix: "api",
-            team_id: "feature_team",
-            role: "architect@architect.primary",
-            actor_summary: "feature architect",
-        };
-    }
-
-    if requirement.contains("[[merge:test-conflict]]") {
-        return MergeReworkRoute {
-            route_name: "test-conflict",
-            task_suffix: "test",
-            team_id: "qa_team",
-            role: "tester@tester.primary",
-            actor_summary: "qa lead",
-        };
-    }
-
-    MergeReworkRoute {
-        route_name: "generic",
-        task_suffix: "generic",
-        team_id: "program_board",
-        role: "supervisor@supervisor.primary",
-        actor_summary: "supervisor",
-    }
+    routes
+        .get(key)
+        .cloned()
+        .or_else(|| routes.get("generic").cloned())
+        .unwrap_or(MergeReworkRoute {
+            route_name: "generic".to_string(),
+            task_suffix: "generic".to_string(),
+            team_id: "program_board".to_string(),
+            role: "supervisor@supervisor.primary".to_string(),
+            actor_summary: "supervisor".to_string(),
+        })
 }
 
 #[cfg(test)]
@@ -429,15 +412,27 @@ mod tests {
 
     #[test]
     fn company_flow_completes_by_default() {
-        let plugins = registry_from_profile(&RuntimeProfile::default()).expect("plugins");
+        let profile = RuntimeProfile::default();
+        let plugins = registry_from_profile(&profile).expect("plugins");
         let goal = GoalContract {
             goal_id: "goal_test_1".to_string(),
             objective: "ship feature".to_string(),
             acceptance_criteria: vec!["tests pass".to_string()],
         };
 
-        let report = run_company_flow("ship feature", goal, 3, 1, false, 1, false, 2, &plugins)
-            .expect("report");
+        let report = run_company_flow(
+            "ship feature",
+            goal,
+            3,
+            1,
+            false,
+            1,
+            &profile.merge_rework_routes,
+            false,
+            2,
+            &plugins,
+        )
+        .expect("report");
         assert_eq!(report.status, ProjectStatus::Completed);
         assert_eq!(report.gates.len(), 4);
         assert!(report.gates.iter().all(|gate| gate.approved));
@@ -445,7 +440,8 @@ mod tests {
 
     #[test]
     fn company_flow_escalates_on_security_veto() {
-        let plugins = registry_from_profile(&RuntimeProfile::default()).expect("plugins");
+        let profile = RuntimeProfile::default();
+        let plugins = registry_from_profile(&profile).expect("plugins");
         let goal = GoalContract {
             goal_id: "goal_test_2".to_string(),
             objective: "ship feature".to_string(),
@@ -459,6 +455,7 @@ mod tests {
             1,
             false,
             1,
+            &profile.merge_rework_routes,
             false,
             2,
             &plugins,
@@ -476,7 +473,8 @@ mod tests {
 
     #[test]
     fn company_flow_retries_role_with_failover() {
-        let plugins = registry_from_profile(&RuntimeProfile::default()).expect("plugins");
+        let profile = RuntimeProfile::default();
+        let plugins = registry_from_profile(&profile).expect("plugins");
         let goal = GoalContract {
             goal_id: "goal_test_3".to_string(),
             objective: "ship feature [[failover:coder]]".to_string(),
@@ -490,6 +488,7 @@ mod tests {
             1,
             false,
             1,
+            &profile.merge_rework_routes,
             true,
             2,
             &plugins,
@@ -513,8 +512,19 @@ mod tests {
             acceptance_criteria: vec!["tests pass".to_string()],
         };
 
-        let report = run_company_flow("ship feature", goal, 4, 2, false, 1, false, 2, &plugins)
-            .expect("report");
+        let report = run_company_flow(
+            "ship feature",
+            goal,
+            4,
+            2,
+            false,
+            1,
+            &profile.merge_rework_routes,
+            false,
+            2,
+            &plugins,
+        )
+        .expect("report");
         assert_eq!(report.status, ProjectStatus::Completed);
         assert!(report
             .trace
@@ -549,6 +559,7 @@ mod tests {
             2,
             false,
             1,
+            &profile.merge_rework_routes,
             false,
             2,
             &plugins,
@@ -579,6 +590,7 @@ mod tests {
             2,
             false,
             1,
+            &profile.merge_rework_routes,
             false,
             2,
             &plugins,
@@ -609,6 +621,7 @@ mod tests {
             2,
             true,
             2,
+            &profile.merge_rework_routes,
             false,
             2,
             &plugins,
@@ -642,6 +655,7 @@ mod tests {
             2,
             true,
             2,
+            &profile.merge_rework_routes,
             false,
             2,
             &plugins,
@@ -652,5 +666,44 @@ mod tests {
             .tasks
             .iter()
             .any(|task| task.task_id == "merge_rework_api_1" && task.team_id == "feature_team"));
+    }
+
+    #[test]
+    fn company_flow_respects_configured_merge_route_overrides() {
+        let mut profile = RuntimeProfile::default();
+        profile.team_topology = "multi".to_string();
+        profile.merge_policy = "strict".to_string();
+        if let Some(route) = profile.merge_rework_routes.get_mut("api-conflict") {
+            route.team_id = "qa_team".to_string();
+            route.role = "tester@tester.primary".to_string();
+            route.actor_summary = "qa override lead".to_string();
+        }
+        let plugins = registry_from_profile(&profile).expect("plugins");
+        let goal = GoalContract {
+            goal_id: "goal_test_9".to_string(),
+            objective: "ship feature [[merge:api-conflict]]".to_string(),
+            acceptance_criteria: vec!["tests pass".to_string()],
+        };
+
+        let report = run_company_flow(
+            "ship feature [[merge:api-conflict]]",
+            goal,
+            4,
+            2,
+            true,
+            2,
+            &profile.merge_rework_routes,
+            false,
+            2,
+            &plugins,
+        )
+        .expect("report");
+
+        assert_eq!(report.status, ProjectStatus::Completed);
+        assert!(report.tasks.iter().any(|task| {
+            task.task_id == "merge_rework_api_1"
+                && task.team_id == "qa_team"
+                && task.role == "tester@tester.primary"
+        }));
     }
 }

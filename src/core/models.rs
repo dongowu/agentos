@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Department {
@@ -66,6 +67,60 @@ pub struct MergeOutcome {
     pub attempts: u32,
     pub note: String,
     pub escalated_to_human: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeReworkRoute {
+    pub route_name: String,
+    pub task_suffix: String,
+    pub team_id: String,
+    pub role: String,
+    pub actor_summary: String,
+}
+
+pub fn default_merge_rework_routes() -> HashMap<String, MergeReworkRoute> {
+    HashMap::from([
+        (
+            "generic".to_string(),
+            MergeReworkRoute {
+                route_name: "generic".to_string(),
+                task_suffix: "generic".to_string(),
+                team_id: "program_board".to_string(),
+                role: "supervisor@supervisor.primary".to_string(),
+                actor_summary: "supervisor".to_string(),
+            },
+        ),
+        (
+            "code-conflict".to_string(),
+            MergeReworkRoute {
+                route_name: "code-conflict".to_string(),
+                task_suffix: "code".to_string(),
+                team_id: "platform_team".to_string(),
+                role: "architect@architect.primary".to_string(),
+                actor_summary: "platform architect".to_string(),
+            },
+        ),
+        (
+            "api-conflict".to_string(),
+            MergeReworkRoute {
+                route_name: "api-conflict".to_string(),
+                task_suffix: "api".to_string(),
+                team_id: "feature_team".to_string(),
+                role: "architect@architect.primary".to_string(),
+                actor_summary: "feature architect".to_string(),
+            },
+        ),
+        (
+            "test-conflict".to_string(),
+            MergeReworkRoute {
+                route_name: "test-conflict".to_string(),
+                task_suffix: "test".to_string(),
+                team_id: "qa_team".to_string(),
+                role: "tester@tester.primary".to_string(),
+                actor_summary: "qa lead".to_string(),
+            },
+        ),
+    ])
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

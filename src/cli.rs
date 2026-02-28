@@ -221,6 +221,7 @@ pub fn run() -> Result<()> {
                 profile.max_parallel_teams,
                 profile.merge_auto_rework,
                 profile.max_merge_retries,
+                profile.merge_rework_routes.clone(),
                 profile.role_failover,
                 profile.max_role_attempts,
             );
