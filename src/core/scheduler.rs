@@ -34,6 +34,7 @@ mod tests {
         let tasks = vec![
             TaskNode {
                 id: "a".to_string(),
+                team_id: "team_a".to_string(),
                 title: "A".to_string(),
                 owner_role: "pm".to_string(),
                 department: Department::Product,
@@ -41,6 +42,7 @@ mod tests {
             },
             TaskNode {
                 id: "b".to_string(),
+                team_id: "team_b".to_string(),
                 title: "B".to_string(),
                 owner_role: "coder".to_string(),
                 department: Department::Engineering,
@@ -48,6 +50,7 @@ mod tests {
             },
             TaskNode {
                 id: "c".to_string(),
+                team_id: "team_c".to_string(),
                 title: "C".to_string(),
                 owner_role: "tester".to_string(),
                 department: Department::Qa,

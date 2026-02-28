@@ -2,6 +2,8 @@ gate_policy: unanimous
 arbiter_policy: two_round
 role_failover: false
 max_role_attempts: 2
+team_topology: single
+max_parallel_teams: 1
 role_instances:
   coder:
     - coder.primary

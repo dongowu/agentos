@@ -17,6 +17,10 @@ pub struct RuntimeProfile {
     pub max_role_attempts: usize,
     #[serde(default)]
     pub role_instances: HashMap<String, Vec<String>>,
+    #[serde(default = "default_team_topology")]
+    pub team_topology: String,
+    #[serde(default = "default_max_parallel_teams")]
+    pub max_parallel_teams: usize,
 }
 
 fn default_gate_policy() -> String {
@@ -31,6 +35,14 @@ fn default_max_role_attempts() -> usize {
     2
 }
 
+fn default_team_topology() -> String {
+    "single".to_string()
+}
+
+fn default_max_parallel_teams() -> usize {
+    1
+}
+
 impl Default for RuntimeProfile {
     fn default() -> Self {
         Self {
@@ -39,6 +51,8 @@ impl Default for RuntimeProfile {
             role_failover: false,
             max_role_attempts: default_max_role_attempts(),
             role_instances: HashMap::new(),
+            team_topology: default_team_topology(),
+            max_parallel_teams: default_max_parallel_teams(),
         }
     }
 }
@@ -79,6 +93,20 @@ impl RuntimeProfile {
     pub fn with_max_role_attempts(mut self, attempts: Option<usize>) -> Self {
         if let Some(attempts) = attempts {
             self.max_role_attempts = attempts.max(1);
+        }
+        self
+    }
+
+    pub fn with_team_topology(mut self, topology: Option<String>) -> Self {
+        if let Some(topology) = topology {
+            self.team_topology = topology;
+        }
+        self
+    }
+
+    pub fn with_max_parallel_teams(mut self, max_parallel_teams: Option<usize>) -> Self {
+        if let Some(max_parallel_teams) = max_parallel_teams {
+            self.max_parallel_teams = max_parallel_teams.max(1);
         }
         self
     }

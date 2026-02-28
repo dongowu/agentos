@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use anyhow::{anyhow, Result};
 
 use crate::core::models::{
-    GateId, GateOutcome, GoalContract, ProjectReport, ProjectStatus, TaskReport,
+    GateId, GateOutcome, GoalContract, ProjectReport, ProjectStatus, TaskNode, TaskReport,
 };
 use crate::core::scheduler::next_runnable;
 use crate::core::trace::TraceLog;
@@ -13,6 +13,7 @@ pub fn run_company_flow(
     requirement: &str,
     goal: GoalContract,
     max_parallel_tasks: usize,
+    max_parallel_teams: usize,
     role_failover: bool,
     max_role_attempts: usize,
     plugins: &PluginRegistry,
@@ -34,8 +35,17 @@ pub fn run_company_flow(
             break;
         }
 
+        let batch = limit_batch_by_team(batch, max_parallel_teams);
+
         let batch_names = batch.iter().map(|task| task.id.clone()).collect::<Vec<_>>();
         trace.push(format!("dispatch batch: {}", batch_names.join(", ")));
+        let batch_teams = batch
+            .iter()
+            .map(|task| task.team_id.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        trace.push(format!("active teams: {}", batch_teams.join(", ")));
 
         for task in &batch {
             running.insert(task.id.clone());
@@ -83,6 +93,7 @@ pub fn run_company_flow(
                 running.remove(&task.id);
                 task_reports.push(TaskReport {
                     task_id: task.id.clone(),
+                    team_id: task.team_id.clone(),
                     role: task.owner_role.clone(),
                     summary: format!(
                         "all role instances failed ({} attempts)",
@@ -103,6 +114,7 @@ pub fn run_company_flow(
             let risk_level = plugins.risk_policy.classify(&execution);
             task_reports.push(TaskReport {
                 task_id: task.id.clone(),
+                team_id: task.team_id.clone(),
                 role: format!("{}@{}", task.owner_role, execution.instance_id),
                 summary: execution.summary,
                 risk_level,
@@ -133,7 +145,7 @@ pub fn run_company_flow(
             gate_outcomes.push(outcome);
         }
 
-        if completed.contains("design") && !has_gate(&gate_outcomes, GateId::Freeze) {
+        if freeze_ready(&completed) && !has_gate(&gate_outcomes, GateId::Freeze) {
             let outcome = evaluate_gate(
                 GateId::Freeze,
                 requirement,
@@ -203,6 +215,26 @@ fn has_gate(gates: &[GateOutcome], gate: GateId) -> bool {
     gates.iter().any(|outcome| outcome.gate == gate)
 }
 
+fn freeze_ready(completed: &HashSet<String>) -> bool {
+    completed.contains("design")
+        || (completed.contains("platform_design") && completed.contains("feature_design"))
+}
+
+fn limit_batch_by_team(batch: Vec<TaskNode>, max_parallel_teams: usize) -> Vec<TaskNode> {
+    if max_parallel_teams == 0 {
+        return Vec::new();
+    }
+    let mut selected = Vec::new();
+    let mut teams = HashSet::new();
+    for task in batch {
+        if teams.contains(&task.team_id) || teams.len() < max_parallel_teams {
+            teams.insert(task.team_id.clone());
+            selected.push(task);
+        }
+    }
+    selected
+}
+
 fn evaluate_gate(
     gate: GateId,
     requirement: &str,
@@ -253,7 +285,8 @@ mod tests {
             acceptance_criteria: vec!["tests pass".to_string()],
         };
 
-        let report = run_company_flow("ship feature", goal, 3, false, 2, &plugins).expect("report");
+        let report =
+            run_company_flow("ship feature", goal, 3, 1, false, 2, &plugins).expect("report");
         assert_eq!(report.status, ProjectStatus::Completed);
         assert_eq!(report.gates.len(), 4);
         assert!(report.gates.iter().all(|gate| gate.approved));
@@ -272,6 +305,7 @@ mod tests {
             "ship feature [[veto:security]]",
             goal,
             3,
+            1,
             false,
             2,
             &plugins,
@@ -300,6 +334,7 @@ mod tests {
             "ship feature [[failover:coder]]",
             goal,
             3,
+            1,
             true,
             2,
             &plugins,
@@ -310,5 +345,33 @@ mod tests {
             .trace
             .iter()
             .any(|line| line.contains("task completed after failover: implementation")));
+    }
+
+    #[test]
+    fn company_flow_multi_team_topology_dispatches_parallel_teams() {
+        let mut profile = RuntimeProfile::default();
+        profile.team_topology = "multi".to_string();
+        let plugins = registry_from_profile(&profile).expect("plugins");
+        let goal = GoalContract {
+            goal_id: "goal_test_4".to_string(),
+            objective: "ship feature".to_string(),
+            acceptance_criteria: vec!["tests pass".to_string()],
+        };
+
+        let report =
+            run_company_flow("ship feature", goal, 4, 2, false, 2, &plugins).expect("report");
+        assert_eq!(report.status, ProjectStatus::Completed);
+        assert!(report
+            .trace
+            .iter()
+            .any(|line| line.contains("dispatch batch: platform_design, feature_design")));
+        assert!(report
+            .tasks
+            .iter()
+            .any(|task| task.team_id == "platform_team"));
+        assert!(report
+            .tasks
+            .iter()
+            .any(|task| task.team_id == "feature_team"));
     }
 }

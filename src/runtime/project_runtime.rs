@@ -8,6 +8,7 @@ use crate::plugins::PluginRegistry;
 pub struct ProjectRuntime {
     plugins: PluginRegistry,
     max_parallel_tasks: usize,
+    max_parallel_teams: usize,
     role_failover: bool,
     max_role_attempts: usize,
 }
@@ -16,12 +17,14 @@ impl ProjectRuntime {
     pub fn new(
         plugins: PluginRegistry,
         max_parallel_tasks: usize,
+        max_parallel_teams: usize,
         role_failover: bool,
         max_role_attempts: usize,
     ) -> Self {
         Self {
             plugins,
             max_parallel_tasks,
+            max_parallel_teams,
             role_failover,
             max_role_attempts,
         }
@@ -41,6 +44,7 @@ impl ProjectRuntime {
             requirement,
             goal,
             self.max_parallel_tasks,
+            self.max_parallel_teams,
             self.role_failover,
             self.max_role_attempts,
             &self.plugins,
