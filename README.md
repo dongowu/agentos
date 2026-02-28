@@ -79,13 +79,20 @@ cargo run -- trace <pipeline_id>
 
 # 企业多团队模式（插件化角色编排）
 cargo run -- team-run "交付一个用户登录系统" --max-parallel 3
+
+# 运行时动态调整策略（命令行覆盖）
+cargo run -- team-run "交付一个用户登录系统" --gate-policy majority --arbiter-policy immediate_escalation
+
+# 通过配置文件加载策略
+cargo run -- team-run "交付一个用户登录系统" --profile-file config/team-runtime.yaml
 ```
 
 `team-run` 使用进程内 Rust 插件注册表（trait + registry）运行企业流程：
 - 5 部门 Board：Product / Engineering / QA / Security / Ops
 - 4 个 Gate：Intake / Freeze / Release / Closure
-- Gate 规则：全员一致通过
-- 冲突处理：Arbiter 两轮协调，失败后升级人工裁决
+- Gate 规则：`unanimous` / `majority`
+- 冲突处理：`two_round` / `immediate_escalation`
+- 策略可通过 `--gate-policy`、`--arbiter-policy` 或 `--profile-file` 动态切换
 
 ## 工作流配置
 

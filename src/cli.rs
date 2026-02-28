@@ -6,7 +6,8 @@ use clap::{Parser, Subcommand};
 use crate::gitops::rollback_to_checkpoint;
 use crate::guard::ExecutionGuard;
 use crate::jobs::JobService;
-use crate::runtime::bootstrap::default_registry;
+use crate::runtime::bootstrap::registry_from_profile;
+use crate::runtime::profile::RuntimeProfile;
 use crate::runtime::project_runtime::ProjectRuntime;
 
 #[derive(Debug, Parser)]
@@ -71,6 +72,12 @@ enum Commands {
         requirement: String,
         #[arg(long, default_value_t = 3)]
         max_parallel: usize,
+        #[arg(long)]
+        profile_file: Option<PathBuf>,
+        #[arg(long)]
+        gate_policy: Option<String>,
+        #[arg(long)]
+        arbiter_policy: Option<String>,
     },
 }
 
@@ -173,8 +180,14 @@ pub fn run() -> Result<()> {
         Commands::TeamRun {
             requirement,
             max_parallel,
+            profile_file,
+            gate_policy,
+            arbiter_policy,
         } => {
-            let runtime = ProjectRuntime::new(default_registry(), max_parallel);
+            let profile = RuntimeProfile::load(profile_file.as_deref())?
+                .with_gate_policy(gate_policy)
+                .with_arbiter_policy(arbiter_policy);
+            let runtime = ProjectRuntime::new(registry_from_profile(&profile)?, max_parallel);
             let report = runtime.team_run(&requirement)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }

@@ -189,11 +189,12 @@ fn evaluate_gate(
 mod tests {
     use super::run_company_flow;
     use crate::core::models::{GoalContract, ProjectStatus};
-    use crate::runtime::bootstrap::default_registry;
+    use crate::runtime::bootstrap::registry_from_profile;
+    use crate::runtime::profile::RuntimeProfile;
 
     #[test]
     fn company_flow_completes_by_default() {
-        let plugins = default_registry();
+        let plugins = registry_from_profile(&RuntimeProfile::default()).expect("plugins");
         let goal = GoalContract {
             goal_id: "goal_test_1".to_string(),
             objective: "ship feature".to_string(),
@@ -208,7 +209,7 @@ mod tests {
 
     #[test]
     fn company_flow_escalates_on_security_veto() {
-        let plugins = default_registry();
+        let plugins = registry_from_profile(&RuntimeProfile::default()).expect("plugins");
         let goal = GoalContract {
             goal_id: "goal_test_2".to_string(),
             objective: "ship feature".to_string(),

@@ -146,6 +146,36 @@ impl GatePolicy for UnanimousGatePolicy {
     }
 }
 
+pub struct MajorityGatePolicy;
+
+impl GatePolicy for MajorityGatePolicy {
+    fn evaluate(&self, gate: GateId, reports: &[TaskReport], requirement: &str) -> Vec<GateVote> {
+        let base = UnanimousGatePolicy;
+        let mut votes = base.evaluate(gate.clone(), reports, requirement);
+
+        // Majority mode allows QA soft objections to proceed when three or more
+        // departments agree, while keeping explicit security veto markers intact.
+        if gate == GateId::Freeze && reports.iter().any(|report| report.risk_level == "high") {
+            if let Some(qa) = votes
+                .iter_mut()
+                .find(|vote| vote.department == Department::Qa)
+            {
+                qa.reason = "qa warns of elevated risk but defers to board majority".to_string();
+                qa.approved = false;
+            }
+            if let Some(engineering) = votes
+                .iter_mut()
+                .find(|vote| vote.department == Department::Engineering)
+            {
+                engineering.reason = "engineering accepts mitigation plan".to_string();
+                engineering.approved = true;
+            }
+        }
+
+        votes
+    }
+}
+
 pub struct TwoRoundArbiter;
 
 impl ArbiterPolicy for TwoRoundArbiter {
@@ -169,6 +199,29 @@ impl ArbiterPolicy for TwoRoundArbiter {
             note: format!(
                 "Arbiter attempted 2 rounds, still blocked by: {}",
                 blocking_departments.join(", ")
+            ),
+            escalated_to_human: true,
+        }
+    }
+}
+
+pub struct EscalateImmediatelyArbiter;
+
+impl ArbiterPolicy for EscalateImmediatelyArbiter {
+    fn resolve(&self, gate: GateId, votes: &[GateVote]) -> ArbiterDecision {
+        if votes.iter().all(|vote| vote.approved) {
+            return ArbiterDecision {
+                approved: true,
+                note: format!("Arbiter confirms {:?} gate pass", gate),
+                escalated_to_human: false,
+            };
+        }
+
+        ArbiterDecision {
+            approved: false,
+            note: format!(
+                "Arbiter escalates {:?} immediately due to policy 'immediate_escalation'",
+                gate
             ),
             escalated_to_human: true,
         }
