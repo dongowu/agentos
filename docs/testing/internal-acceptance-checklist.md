@@ -32,6 +32,7 @@ Any item marked failed blocks merging feature branches into `main`.
 - [ ] Merge conflict with auto-rework can recover in expected scenarios.
 - [ ] Trace includes route selection context (`marker`, `priority`, `mode`, `expr`).
 - [ ] Trace includes fallback event when no rule matches.
+- [ ] Stage-1 script asserts merge rework evidence (`merge_rework_api_1`) and auto-rework trace line.
 
 ## E. Branch Policy
 
