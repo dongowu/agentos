@@ -5,7 +5,7 @@ Any item marked failed blocks merging feature branches into `main`.
 
 ## A. Baseline
 
-- [ ] `./scripts/stage1_acceptance.sh` completes end-to-end.
+- [ ] `./scripts/stage1_acceptance.sh` completes end-to-end with JSON assertions passing.
 - [ ] `cargo test -q` passes locally.
 - [ ] `cargo run -- team-run "demo [[merge:api-conflict]]" --explain-routing --explain-retry-round 1` returns valid JSON.
 - [ ] `cargo run -- team-run "demo [[merge:api-conflict]]" --team-topology multi --merge-policy strict --enable-merge-auto-rework --max-merge-retries 2 --max-parallel 4 --max-parallel-teams 2 --profile-file config/team-runtime.yaml` completes successfully.
