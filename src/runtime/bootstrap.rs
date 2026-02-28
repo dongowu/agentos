@@ -50,6 +50,8 @@ mod tests {
             gate_policy: "does_not_exist".to_string(),
             arbiter_policy: "two_round".to_string(),
             merge_policy: "strict".to_string(),
+            merge_auto_rework: false,
+            max_merge_retries: 1,
             role_failover: false,
             max_role_attempts: 2,
             role_instances: Default::default(),

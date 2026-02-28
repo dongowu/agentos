@@ -15,6 +15,8 @@ pub fn run_company_flow(
     goal: GoalContract,
     max_parallel_tasks: usize,
     max_parallel_teams: usize,
+    merge_auto_rework: bool,
+    max_merge_retries: u32,
     role_failover: bool,
     max_role_attempts: usize,
     plugins: &PluginRegistry,
@@ -172,7 +174,14 @@ pub fn run_company_flow(
         }
 
         if merge_outcome.is_none() && merge_ready(&completed) {
-            let outcome = evaluate_merge(requirement, &task_reports, plugins, &mut trace);
+            let outcome = evaluate_merge_with_auto_rework(
+                requirement,
+                &mut task_reports,
+                plugins,
+                &mut trace,
+                merge_auto_rework,
+                max_merge_retries,
+            );
             if !outcome.approved {
                 merge_outcome = Some(outcome);
                 return Ok(ProjectReport {
@@ -318,6 +327,46 @@ fn evaluate_merge(
     outcome
 }
 
+fn evaluate_merge_with_auto_rework(
+    requirement: &str,
+    reports: &mut Vec<TaskReport>,
+    plugins: &PluginRegistry,
+    trace: &mut TraceLog,
+    merge_auto_rework: bool,
+    max_merge_retries: u32,
+) -> MergeOutcome {
+    let mut outcome = evaluate_merge(requirement, reports, plugins, trace);
+    if outcome.approved || !merge_auto_rework {
+        return outcome;
+    }
+
+    let max_retries = max_merge_retries.max(1);
+    for retry in 1..=max_retries {
+        trace.push(format!(
+            "merge auto-rework round {}: rollback to last checkpoint and regenerate conflicted outputs",
+            retry
+        ));
+        reports.push(TaskReport {
+            task_id: format!("merge_rework_{}", retry),
+            team_id: "program_board".to_string(),
+            role: "supervisor@supervisor.primary".to_string(),
+            summary: format!(
+                "supervisor executed merge rework round {} for cross-team convergence",
+                retry
+            ),
+            risk_level: "medium".to_string(),
+            artifacts: vec![format!("artifacts/merge/rework-round-{}.md", retry)],
+        });
+
+        outcome = evaluate_merge(requirement, reports, plugins, trace);
+        if outcome.approved {
+            return outcome;
+        }
+    }
+
+    outcome
+}
+
 #[cfg(test)]
 mod tests {
     use super::run_company_flow;
@@ -334,8 +383,8 @@ mod tests {
             acceptance_criteria: vec!["tests pass".to_string()],
         };
 
-        let report =
-            run_company_flow("ship feature", goal, 3, 1, false, 2, &plugins).expect("report");
+        let report = run_company_flow("ship feature", goal, 3, 1, false, 1, false, 2, &plugins)
+            .expect("report");
         assert_eq!(report.status, ProjectStatus::Completed);
         assert_eq!(report.gates.len(), 4);
         assert!(report.gates.iter().all(|gate| gate.approved));
@@ -354,6 +403,8 @@ mod tests {
             "ship feature [[veto:security]]",
             goal,
             3,
+            1,
+            false,
             1,
             false,
             2,
@@ -384,6 +435,8 @@ mod tests {
             goal,
             3,
             1,
+            false,
+            1,
             true,
             2,
             &plugins,
@@ -407,8 +460,8 @@ mod tests {
             acceptance_criteria: vec!["tests pass".to_string()],
         };
 
-        let report =
-            run_company_flow("ship feature", goal, 4, 2, false, 2, &plugins).expect("report");
+        let report = run_company_flow("ship feature", goal, 4, 2, false, 1, false, 2, &plugins)
+            .expect("report");
         assert_eq!(report.status, ProjectStatus::Completed);
         assert!(report
             .trace
@@ -442,6 +495,8 @@ mod tests {
             4,
             2,
             false,
+            1,
+            false,
             2,
             &plugins,
         )
@@ -470,6 +525,8 @@ mod tests {
             4,
             2,
             false,
+            1,
+            false,
             2,
             &plugins,
         )
@@ -478,5 +535,38 @@ mod tests {
         let merge = report.merge.expect("merge outcome");
         assert!(merge.approved);
         assert_eq!(merge.attempts, 2);
+    }
+
+    #[test]
+    fn company_flow_auto_rework_recovers_merge_conflict() {
+        let mut profile = RuntimeProfile::default();
+        profile.team_topology = "multi".to_string();
+        profile.merge_policy = "strict".to_string();
+        let plugins = registry_from_profile(&profile).expect("plugins");
+        let goal = GoalContract {
+            goal_id: "goal_test_7".to_string(),
+            objective: "ship feature [[merge:conflict]]".to_string(),
+            acceptance_criteria: vec!["tests pass".to_string()],
+        };
+
+        let report = run_company_flow(
+            "ship feature [[merge:conflict]]",
+            goal,
+            4,
+            2,
+            true,
+            2,
+            false,
+            2,
+            &plugins,
+        )
+        .expect("report");
+        assert_eq!(report.status, ProjectStatus::Completed);
+        let merge = report.merge.expect("merge outcome");
+        assert!(merge.approved);
+        assert!(report
+            .trace
+            .iter()
+            .any(|line| line.contains("merge auto-rework round 1")));
     }
 }

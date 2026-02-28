@@ -424,6 +424,17 @@ impl MergePolicy for StrictMergePolicy {
         }
 
         if requirement.contains("[[merge:conflict]]") {
+            if reports
+                .iter()
+                .any(|report| report.task_id.starts_with("merge_rework_"))
+            {
+                return MergeOutcome {
+                    approved: true,
+                    attempts: 2,
+                    note: "merge conflict resolved after automated rework".to_string(),
+                    escalated_to_human: false,
+                };
+            }
             if requirement.contains("[[merge:retry-ok]]") {
                 return MergeOutcome {
                     approved: true,

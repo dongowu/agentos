@@ -9,6 +9,8 @@ pub struct ProjectRuntime {
     plugins: PluginRegistry,
     max_parallel_tasks: usize,
     max_parallel_teams: usize,
+    merge_auto_rework: bool,
+    max_merge_retries: u32,
     role_failover: bool,
     max_role_attempts: usize,
 }
@@ -18,6 +20,8 @@ impl ProjectRuntime {
         plugins: PluginRegistry,
         max_parallel_tasks: usize,
         max_parallel_teams: usize,
+        merge_auto_rework: bool,
+        max_merge_retries: u32,
         role_failover: bool,
         max_role_attempts: usize,
     ) -> Self {
@@ -25,6 +29,8 @@ impl ProjectRuntime {
             plugins,
             max_parallel_tasks,
             max_parallel_teams,
+            merge_auto_rework,
+            max_merge_retries,
             role_failover,
             max_role_attempts,
         }
@@ -45,6 +51,8 @@ impl ProjectRuntime {
             goal,
             self.max_parallel_tasks,
             self.max_parallel_teams,
+            self.merge_auto_rework,
+            self.max_merge_retries,
             self.role_failover,
             self.max_role_attempts,
             &self.plugins,
