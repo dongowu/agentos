@@ -103,6 +103,8 @@ mod tests {
         );
 
         let explain = runtime.explain_routing("demo [[merge:api-conflict]]", 1);
+        assert_eq!(explain.max_risk_level, "unknown");
+        assert!(explain.team_loads.contains_key("api-conflict"));
         assert_eq!(explain.selected_route.route_name, "api-conflict");
         assert!(explain
             .matched_rule

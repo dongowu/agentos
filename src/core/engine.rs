@@ -439,8 +439,14 @@ pub fn explain_merge_route_decision(
     }
 
     let selected = detect_merge_rework_route(requirement, reports, retry_round, routes, rules);
+    let team_loads = routes
+        .iter()
+        .map(|(key, route)| (key.clone(), team_load(reports, &route.team_id)))
+        .collect::<HashMap<_, _>>();
     MergeRouteExplanation {
         retry_round,
+        max_risk_level: risk_label(max_risk_level(reports)).to_string(),
+        team_loads,
         selected_route: selected.route,
         matched_rule: selected.matched_rule,
         checks,
@@ -703,6 +709,15 @@ fn risk_rank(risk_level: &str) -> u8 {
         "medium" => 2,
         "low" => 1,
         _ => 0,
+    }
+}
+
+fn risk_label(rank: u8) -> &'static str {
+    match rank {
+        3 => "high",
+        2 => "medium",
+        1 => "low",
+        _ => "unknown",
     }
 }
 

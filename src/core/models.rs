@@ -82,6 +82,8 @@ pub struct MergeRuleCheck {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeRouteExplanation {
     pub retry_round: u32,
+    pub max_risk_level: String,
+    pub team_loads: HashMap<String, usize>,
     pub selected_route: MergeReworkRoute,
     pub matched_rule: Option<MergeReworkRule>,
     pub checks: Vec<MergeRuleCheck>,

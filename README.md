@@ -95,6 +95,8 @@ cargo run -- team-run "交付一个用户登录系统 [[merge:api-conflict]]" --
 # 仅预览路由命中（不执行团队流程）
 cargo run -- team-run "交付一个用户登录系统 [[merge:api-conflict]]" --explain-routing --explain-retry-round 1
 
+# 说明：explain 输出会包含 `max_risk_level` 与 `team_loads` 上下文，帮助定位为什么规则命中/未命中
+
 # 启用多团队拓扑（跨团队并行收敛）
 cargo run -- team-run "交付一个用户登录系统" --team-topology multi --max-parallel 4 --max-parallel-teams 2
 
