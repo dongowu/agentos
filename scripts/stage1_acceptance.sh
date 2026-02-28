@@ -26,6 +26,37 @@ assert 'team_loads' in data and isinstance(data['team_loads'], dict), 'team_load
 assert 'max_risk_level' in data, 'max_risk_level must be present'
 PY
 
+echo "[stage1] 2b/3 explain fallback routing when api rule disabled"
+python3 - <<'PY'
+from pathlib import Path
+
+src = Path('config/team-runtime.yaml').read_text()
+patched = src.replace(
+    'route_key: api-conflict\n    priority: 20\n    enabled: true',
+    'route_key: api-conflict\n    priority: 20\n    enabled: false',
+    1,
+)
+Path('/tmp/stage1_fallback_profile.yaml').write_text(patched)
+PY
+
+cargo run -- team-run "demo [[merge:api-conflict]] [[merge:conflict]]" --explain-routing --explain-retry-round 1 --profile-file /tmp/stage1_fallback_profile.yaml > /tmp/stage1_fallback_explain.json
+
+echo "[stage1] validate fallback explain output"
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+path = Path('/tmp/stage1_fallback_explain.json')
+data = json.loads(path.read_text())
+
+assert data.get('selected_route', {}).get('route_name') == 'generic', 'selected route must fall back to generic'
+checks = data.get('checks', [])
+api_check = next((item for item in checks if item.get('route_key') == 'api-conflict'), None)
+assert api_check is not None, 'api-conflict check must exist'
+assert api_check.get('matched') is False, 'api-conflict rule should not match when disabled'
+assert api_check.get('reason') == 'disabled', 'api-conflict rule should be marked disabled'
+PY
+
 echo "[stage1] 3/3 execute multi-team flow"
 cargo run -- team-run "demo [[merge:api-conflict]]" --team-topology multi --merge-policy strict --enable-merge-auto-rework --max-merge-retries 2 --max-parallel 4 --max-parallel-teams 2 --profile-file config/team-runtime.yaml > /tmp/stage1_run.json
 
