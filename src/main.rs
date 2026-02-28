@@ -3,6 +3,7 @@ mod core;
 mod gitops;
 mod guard;
 mod jobs;
+mod llm;
 mod messaging;
 mod pipeline;
 mod plugins;

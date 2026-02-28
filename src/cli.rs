@@ -89,6 +89,12 @@ enum Commands {
         #[arg(long)]
         merge_policy: Option<String>,
         #[arg(long)]
+        llm_adapter: Option<String>,
+        #[arg(long)]
+        llm_model: Option<String>,
+        #[arg(long)]
+        llm_script_command: Option<String>,
+        #[arg(long)]
         enable_merge_auto_rework: bool,
         #[arg(long)]
         max_merge_retries: Option<u32>,
@@ -206,6 +212,9 @@ pub fn run() -> Result<()> {
             gate_policy,
             arbiter_policy,
             merge_policy,
+            llm_adapter,
+            llm_model,
+            llm_script_command,
             enable_merge_auto_rework,
             max_merge_retries,
             explain_routing,
@@ -215,6 +224,9 @@ pub fn run() -> Result<()> {
                 .with_gate_policy(gate_policy)
                 .with_arbiter_policy(arbiter_policy)
                 .with_merge_policy(merge_policy)
+                .with_llm_adapter(llm_adapter)
+                .with_llm_model(llm_model)
+                .with_llm_script_command(llm_script_command)
                 .with_merge_auto_rework(enable_merge_auto_rework)
                 .with_max_merge_retries(max_merge_retries)
                 .with_team_topology(team_topology)
