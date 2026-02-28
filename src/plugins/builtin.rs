@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use anyhow::anyhow;
 use anyhow::Result;
 
 use crate::core::models::{Department, GateId, GateVote, GoalContract, TaskNode, TaskReport};
@@ -6,16 +9,78 @@ use crate::plugins::{
     TeamStrategy,
 };
 
-pub struct BuiltinRoleProvider;
+pub struct BuiltinRoleProvider {
+    role_instances: HashMap<String, Vec<String>>,
+}
+
+impl BuiltinRoleProvider {
+    pub fn from_overrides(overrides: HashMap<String, Vec<String>>) -> Self {
+        let mut role_instances = HashMap::from([
+            (
+                "product_lead".to_string(),
+                vec!["product_lead.primary".to_string()],
+            ),
+            (
+                "architect".to_string(),
+                vec!["architect.primary".to_string()],
+            ),
+            (
+                "coder".to_string(),
+                vec!["coder.primary".to_string(), "coder.backup".to_string()],
+            ),
+            (
+                "tester".to_string(),
+                vec!["tester.primary".to_string(), "tester.backup".to_string()],
+            ),
+            (
+                "security_lead".to_string(),
+                vec!["security_lead.primary".to_string()],
+            ),
+            (
+                "release_manager".to_string(),
+                vec!["release_manager.primary".to_string()],
+            ),
+        ]);
+        for (role, instances) in overrides {
+            role_instances.insert(role, instances);
+        }
+        Self { role_instances }
+    }
+}
 
 impl RoleProvider for BuiltinRoleProvider {
-    fn execute(&self, role: &str, task: &TaskNode, goal: &GoalContract) -> Result<RoleExecution> {
+    fn available_instances(&self, role: &str) -> Vec<String> {
+        self.role_instances
+            .get(role)
+            .cloned()
+            .unwrap_or_else(|| vec![format!("{}.primary", role)])
+    }
+
+    fn execute(
+        &self,
+        role: &str,
+        instance_id: &str,
+        task: &TaskNode,
+        goal: &GoalContract,
+    ) -> Result<RoleExecution> {
+        let failover_marker = format!("[[failover:{}]]", role);
+        if goal.objective.contains(&failover_marker) && instance_id.ends_with(".primary") {
+            return Err(anyhow!(
+                "simulated failure on {} for role {}",
+                instance_id,
+                role
+            ));
+        }
         let summary = format!(
-            "{} completed '{}' for goal {}",
-            role, task.title, goal.goal_id
+            "{} ({}) completed '{}' for goal {}",
+            role, instance_id, task.title, goal.goal_id
         );
-        let artifacts = vec![format!("artifacts/{}/{}.md", task.id, role)];
-        Ok(RoleExecution { summary, artifacts })
+        let artifacts = vec![format!("artifacts/{}/{}.md", task.id, instance_id)];
+        Ok(RoleExecution {
+            instance_id: instance_id.to_string(),
+            summary,
+            artifacts,
+        })
     }
 }
 

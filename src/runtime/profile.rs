@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -10,6 +11,12 @@ pub struct RuntimeProfile {
     pub gate_policy: String,
     #[serde(default = "default_arbiter_policy")]
     pub arbiter_policy: String,
+    #[serde(default)]
+    pub role_failover: bool,
+    #[serde(default = "default_max_role_attempts")]
+    pub max_role_attempts: usize,
+    #[serde(default)]
+    pub role_instances: HashMap<String, Vec<String>>,
 }
 
 fn default_gate_policy() -> String {
@@ -20,11 +27,18 @@ fn default_arbiter_policy() -> String {
     "two_round".to_string()
 }
 
+fn default_max_role_attempts() -> usize {
+    2
+}
+
 impl Default for RuntimeProfile {
     fn default() -> Self {
         Self {
             gate_policy: default_gate_policy(),
             arbiter_policy: default_arbiter_policy(),
+            role_failover: false,
+            max_role_attempts: default_max_role_attempts(),
+            role_instances: HashMap::new(),
         }
     }
 }
@@ -51,6 +65,20 @@ impl RuntimeProfile {
     pub fn with_arbiter_policy(mut self, policy: Option<String>) -> Self {
         if let Some(policy) = policy {
             self.arbiter_policy = policy;
+        }
+        self
+    }
+
+    pub fn with_role_failover(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.role_failover = true;
+        }
+        self
+    }
+
+    pub fn with_max_role_attempts(mut self, attempts: Option<usize>) -> Self {
+        if let Some(attempts) = attempts {
+            self.max_role_attempts = attempts.max(1);
         }
         self
     }

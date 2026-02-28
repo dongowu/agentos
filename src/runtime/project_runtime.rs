@@ -8,13 +8,22 @@ use crate::plugins::PluginRegistry;
 pub struct ProjectRuntime {
     plugins: PluginRegistry,
     max_parallel_tasks: usize,
+    role_failover: bool,
+    max_role_attempts: usize,
 }
 
 impl ProjectRuntime {
-    pub fn new(plugins: PluginRegistry, max_parallel_tasks: usize) -> Self {
+    pub fn new(
+        plugins: PluginRegistry,
+        max_parallel_tasks: usize,
+        role_failover: bool,
+        max_role_attempts: usize,
+    ) -> Self {
         Self {
             plugins,
             max_parallel_tasks,
+            role_failover,
+            max_role_attempts,
         }
     }
 
@@ -28,6 +37,13 @@ impl ProjectRuntime {
             ],
         };
 
-        run_company_flow(requirement, goal, self.max_parallel_tasks, &self.plugins)
+        run_company_flow(
+            requirement,
+            goal,
+            self.max_parallel_tasks,
+            self.role_failover,
+            self.max_role_attempts,
+            &self.plugins,
+        )
     }
 }

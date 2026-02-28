@@ -1,2 +1,8 @@
 gate_policy: unanimous
 arbiter_policy: two_round
+role_failover: false
+max_role_attempts: 2
+role_instances:
+  coder:
+    - coder.primary
+    - coder.backup

@@ -8,6 +8,7 @@ pub mod builtin;
 
 #[derive(Debug, Clone)]
 pub struct RoleExecution {
+    pub instance_id: String,
     pub summary: String,
     pub artifacts: Vec<String>,
 }
@@ -20,7 +21,14 @@ pub struct ArbiterDecision {
 }
 
 pub trait RoleProvider: Send + Sync {
-    fn execute(&self, role: &str, task: &TaskNode, goal: &GoalContract) -> Result<RoleExecution>;
+    fn available_instances(&self, role: &str) -> Vec<String>;
+    fn execute(
+        &self,
+        role: &str,
+        instance_id: &str,
+        task: &TaskNode,
+        goal: &GoalContract,
+    ) -> Result<RoleExecution>;
 }
 
 pub trait TeamStrategy: Send + Sync {

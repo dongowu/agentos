@@ -22,7 +22,9 @@ pub fn registry_from_profile(profile: &RuntimeProfile) -> Result<PluginRegistry>
     };
 
     Ok(PluginRegistry {
-        role_provider: Arc::new(BuiltinRoleProvider),
+        role_provider: Arc::new(BuiltinRoleProvider::from_overrides(
+            profile.role_instances.clone(),
+        )),
         team_strategy: Arc::new(BuiltinTeamStrategy),
         gate_policy,
         arbiter_policy,
@@ -40,6 +42,9 @@ mod tests {
         let profile = RuntimeProfile {
             gate_policy: "does_not_exist".to_string(),
             arbiter_policy: "two_round".to_string(),
+            role_failover: false,
+            max_role_attempts: 2,
+            role_instances: Default::default(),
         };
 
         let err = match registry_from_profile(&profile) {

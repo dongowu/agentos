@@ -13,6 +13,8 @@ pub fn run_company_flow(
     requirement: &str,
     goal: GoalContract,
     max_parallel_tasks: usize,
+    role_failover: bool,
+    max_role_attempts: usize,
     plugins: &PluginRegistry,
 ) -> Result<ProjectReport> {
     let task_graph = plugins.team_strategy.build_task_graph(requirement, &goal);
@@ -40,22 +42,72 @@ pub fn run_company_flow(
         }
 
         for task in batch {
-            let execution = plugins
-                .role_provider
-                .execute(&task.owner_role, &task, &goal)?;
+            let instances = plugins.role_provider.available_instances(&task.owner_role);
+            let attempt_limit = if role_failover {
+                max_role_attempts.max(1).min(instances.len().max(1))
+            } else {
+                1
+            };
+
+            let mut execution_result = None;
+            let mut failure_messages = Vec::new();
+            for instance_id in instances.iter().take(attempt_limit) {
+                match plugins
+                    .role_provider
+                    .execute(&task.owner_role, instance_id, &task, &goal)
+                {
+                    Ok(execution) => {
+                        execution_result = Some(execution);
+                        if failure_messages.is_empty() {
+                            trace.push(format!("task completed: {} by {}", task.id, instance_id));
+                        } else {
+                            trace.push(format!(
+                                "task completed after failover: {} by {}",
+                                task.id, instance_id
+                            ));
+                        }
+                        break;
+                    }
+                    Err(err) => {
+                        let message = format!(
+                            "task {} failed on instance {}: {}",
+                            task.id, instance_id, err
+                        );
+                        trace.push(message.clone());
+                        failure_messages.push(message);
+                    }
+                }
+            }
+
+            let Some(execution) = execution_result else {
+                running.remove(&task.id);
+                task_reports.push(TaskReport {
+                    task_id: task.id.clone(),
+                    role: task.owner_role.clone(),
+                    summary: format!(
+                        "all role instances failed ({} attempts)",
+                        failure_messages.len()
+                    ),
+                    risk_level: "high".to_string(),
+                    artifacts: Vec::new(),
+                });
+                return Ok(ProjectReport {
+                    goal,
+                    status: ProjectStatus::NeedsHumanDecision,
+                    tasks: task_reports,
+                    gates: gate_outcomes,
+                    trace: trace.into_entries(),
+                });
+            };
+
             let risk_level = plugins.risk_policy.classify(&execution);
-            let report = TaskReport {
+            task_reports.push(TaskReport {
                 task_id: task.id.clone(),
-                role: task.owner_role.clone(),
+                role: format!("{}@{}", task.owner_role, execution.instance_id),
                 summary: execution.summary,
                 risk_level,
                 artifacts: execution.artifacts,
-            };
-            trace.push(format!(
-                "task completed: {} by {}",
-                task.id, task.owner_role
-            ));
-            task_reports.push(report);
+            });
             running.remove(&task.id);
             completed.insert(task.id);
         }
@@ -201,7 +253,7 @@ mod tests {
             acceptance_criteria: vec!["tests pass".to_string()],
         };
 
-        let report = run_company_flow("ship feature", goal, 3, &plugins).expect("report");
+        let report = run_company_flow("ship feature", goal, 3, false, 2, &plugins).expect("report");
         assert_eq!(report.status, ProjectStatus::Completed);
         assert_eq!(report.gates.len(), 4);
         assert!(report.gates.iter().all(|gate| gate.approved));
@@ -216,8 +268,15 @@ mod tests {
             acceptance_criteria: vec!["tests pass".to_string()],
         };
 
-        let report =
-            run_company_flow("ship feature [[veto:security]]", goal, 3, &plugins).expect("report");
+        let report = run_company_flow(
+            "ship feature [[veto:security]]",
+            goal,
+            3,
+            false,
+            2,
+            &plugins,
+        )
+        .expect("report");
         assert_eq!(report.status, ProjectStatus::NeedsHumanDecision);
         let release_gate = report
             .gates
@@ -226,5 +285,30 @@ mod tests {
             .expect("release gate");
         assert!(!release_gate.approved);
         assert!(release_gate.escalated_to_human);
+    }
+
+    #[test]
+    fn company_flow_retries_role_with_failover() {
+        let plugins = registry_from_profile(&RuntimeProfile::default()).expect("plugins");
+        let goal = GoalContract {
+            goal_id: "goal_test_3".to_string(),
+            objective: "ship feature [[failover:coder]]".to_string(),
+            acceptance_criteria: vec!["tests pass".to_string()],
+        };
+
+        let report = run_company_flow(
+            "ship feature [[failover:coder]]",
+            goal,
+            3,
+            true,
+            2,
+            &plugins,
+        )
+        .expect("report");
+        assert_eq!(report.status, ProjectStatus::Completed);
+        assert!(report
+            .trace
+            .iter()
+            .any(|line| line.contains("task completed after failover: implementation")));
     }
 }

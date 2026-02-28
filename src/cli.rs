@@ -73,6 +73,10 @@ enum Commands {
         #[arg(long, default_value_t = 3)]
         max_parallel: usize,
         #[arg(long)]
+        enable_role_failover: bool,
+        #[arg(long)]
+        max_role_attempts: Option<usize>,
+        #[arg(long)]
         profile_file: Option<PathBuf>,
         #[arg(long)]
         gate_policy: Option<String>,
@@ -180,14 +184,23 @@ pub fn run() -> Result<()> {
         Commands::TeamRun {
             requirement,
             max_parallel,
+            enable_role_failover,
+            max_role_attempts,
             profile_file,
             gate_policy,
             arbiter_policy,
         } => {
             let profile = RuntimeProfile::load(profile_file.as_deref())?
                 .with_gate_policy(gate_policy)
-                .with_arbiter_policy(arbiter_policy);
-            let runtime = ProjectRuntime::new(registry_from_profile(&profile)?, max_parallel);
+                .with_arbiter_policy(arbiter_policy)
+                .with_role_failover(enable_role_failover)
+                .with_max_role_attempts(max_role_attempts);
+            let runtime = ProjectRuntime::new(
+                registry_from_profile(&profile)?,
+                max_parallel,
+                profile.role_failover,
+                profile.max_role_attempts,
+            );
             let report = runtime.team_run(&requirement)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }

@@ -83,6 +83,9 @@ cargo run -- team-run "交付一个用户登录系统" --max-parallel 3
 # 运行时动态调整策略（命令行覆盖）
 cargo run -- team-run "交付一个用户登录系统" --gate-policy majority --arbiter-policy immediate_escalation
 
+# 启用动态角色故障切换（同一角色多实例）
+cargo run -- team-run "交付一个用户登录系统 [[failover:coder]]" --enable-role-failover --max-role-attempts 2
+
 # 通过配置文件加载策略
 cargo run -- team-run "交付一个用户登录系统" --profile-file config/team-runtime.yaml
 ```
@@ -92,6 +95,7 @@ cargo run -- team-run "交付一个用户登录系统" --profile-file config/tea
 - 4 个 Gate：Intake / Freeze / Release / Closure
 - Gate 规则：`unanimous` / `majority`
 - 冲突处理：`two_round` / `immediate_escalation`
+- 角色管理：`--enable-role-failover` + `--max-role-attempts`（或 profile 中配置）
 - 策略可通过 `--gate-policy`、`--arbiter-policy` 或 `--profile-file` 动态切换
 
 ## 工作流配置
