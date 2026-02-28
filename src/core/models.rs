@@ -19,6 +19,7 @@ pub struct GoalContract {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskNode {
     pub id: String,
+    pub team_id: String,
     pub title: String,
     pub owner_role: String,
     pub department: Department,
@@ -28,6 +29,7 @@ pub struct TaskNode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskReport {
     pub task_id: String,
+    pub team_id: String,
     pub role: String,
     pub summary: String,
     pub risk_level: String,

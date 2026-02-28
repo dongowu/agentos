@@ -25,7 +25,7 @@ pub fn registry_from_profile(profile: &RuntimeProfile) -> Result<PluginRegistry>
         role_provider: Arc::new(BuiltinRoleProvider::from_overrides(
             profile.role_instances.clone(),
         )),
-        team_strategy: Arc::new(BuiltinTeamStrategy),
+        team_strategy: Arc::new(BuiltinTeamStrategy::new(profile.team_topology.clone())),
         gate_policy,
         arbiter_policy,
         risk_policy: Arc::new(BuiltinRiskPolicy),
@@ -45,6 +45,8 @@ mod tests {
             role_failover: false,
             max_role_attempts: 2,
             role_instances: Default::default(),
+            team_topology: "single".to_string(),
+            max_parallel_teams: 1,
         };
 
         let err = match registry_from_profile(&profile) {

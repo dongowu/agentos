@@ -73,6 +73,10 @@ enum Commands {
         #[arg(long, default_value_t = 3)]
         max_parallel: usize,
         #[arg(long)]
+        team_topology: Option<String>,
+        #[arg(long)]
+        max_parallel_teams: Option<usize>,
+        #[arg(long)]
         enable_role_failover: bool,
         #[arg(long)]
         max_role_attempts: Option<usize>,
@@ -184,6 +188,8 @@ pub fn run() -> Result<()> {
         Commands::TeamRun {
             requirement,
             max_parallel,
+            team_topology,
+            max_parallel_teams,
             enable_role_failover,
             max_role_attempts,
             profile_file,
@@ -193,11 +199,14 @@ pub fn run() -> Result<()> {
             let profile = RuntimeProfile::load(profile_file.as_deref())?
                 .with_gate_policy(gate_policy)
                 .with_arbiter_policy(arbiter_policy)
+                .with_team_topology(team_topology)
+                .with_max_parallel_teams(max_parallel_teams)
                 .with_role_failover(enable_role_failover)
                 .with_max_role_attempts(max_role_attempts);
             let runtime = ProjectRuntime::new(
                 registry_from_profile(&profile)?,
                 max_parallel,
+                profile.max_parallel_teams,
                 profile.role_failover,
                 profile.max_role_attempts,
             );
