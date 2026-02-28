@@ -503,9 +503,53 @@ fn evaluate_rule_for_explain(
         return (false, "marker not present".to_string());
     }
     if !rule_conditions_match(rule, reports, retry_round, routes) {
-        return (false, "conditions not satisfied".to_string());
+        let reason = explain_condition_mismatch(rule, reports, retry_round, routes);
+        return (false, reason);
     }
     (true, "matched".to_string())
+}
+
+fn explain_condition_mismatch(
+    rule: &MergeReworkRule,
+    reports: &[TaskReport],
+    retry_round: u32,
+    routes: &HashMap<String, MergeReworkRoute>,
+) -> String {
+    let mut failed = Vec::new();
+
+    if let Some(min_retry) = rule.min_retry_round {
+        if retry_round < min_retry {
+            failed.push(format!("retry_round {} < {}", retry_round, min_retry));
+        }
+    }
+
+    if let Some(required) = rule.required_risk_level.as_ref() {
+        if max_risk_level(reports) < risk_rank(required) {
+            failed.push(format!("max_risk below {}", required));
+        }
+    }
+
+    if let Some(limit) = rule.max_team_load {
+        let overloaded = routes
+            .get(&rule.route_key)
+            .map(|route| team_load(reports, &route.team_id) > limit)
+            .unwrap_or(true);
+        if overloaded {
+            failed.push(format!("team_load exceeds {}", limit));
+        }
+    }
+
+    if let Some(expr) = rule.condition_expression.as_ref() {
+        if !evaluate_condition_expression(expr, reports, retry_round, routes, rule) {
+            failed.push(format!("expr '{}' is false", expr));
+        }
+    }
+
+    if failed.is_empty() {
+        "conditions not satisfied".to_string()
+    } else {
+        format!("conditions failed: {}", failed.join(", "))
+    }
 }
 
 fn rule_conditions_match(

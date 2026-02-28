@@ -110,4 +110,36 @@ mod tests {
             .map(|rule| rule.route_key == "api-conflict")
             .unwrap_or(false));
     }
+
+    #[test]
+    fn explain_routing_reports_condition_failure_reason() {
+        let mut profile = RuntimeProfile::default();
+        if let Some(rule) = profile
+            .merge_rework_rules
+            .iter_mut()
+            .find(|rule| rule.route_key == "api-conflict")
+        {
+            rule.min_retry_round = Some(2);
+        }
+        let runtime = ProjectRuntime::new(
+            registry_from_profile(&profile).expect("plugins"),
+            3,
+            1,
+            false,
+            1,
+            profile.merge_rework_routes.clone(),
+            profile.merge_rework_rules.clone(),
+            false,
+            2,
+        );
+
+        let explain = runtime.explain_routing("demo [[merge:api-conflict]]", 1);
+        let api_check = explain
+            .checks
+            .iter()
+            .find(|check| check.route_key == "api-conflict")
+            .expect("api check");
+        assert!(!api_check.matched);
+        assert!(api_check.reason.contains("retry_round 1 < 2"));
+    }
 }
