@@ -7,7 +7,9 @@ import (
 
 	"github.com/dongowu/agentos/internal/messaging"
 	"github.com/dongowu/agentos/internal/persistence"
+	"github.com/dongowu/agentos/internal/policy"
 	"github.com/dongowu/agentos/internal/runtimeclient"
+	"github.com/dongowu/agentos/internal/scheduler"
 	"github.com/dongowu/agentos/pkg/events"
 	"github.com/dongowu/agentos/pkg/taskdsl"
 )
@@ -18,17 +20,37 @@ type EngineImpl struct {
 	bus           messaging.EventBus
 	planner       Planner
 	skillResolver SkillResolver
-	executor      runtimeclient.ExecutorClient
+	executor      runtimeclient.ExecutorClient // fallback for direct execution
+	policy        policy.PolicyEngine          // nil = skip policy checks
+	scheduler     scheduler.Scheduler          // nil = use direct executor
 }
 
 // NewEngineImpl returns a new task engine.
 // skillResolver may be nil; then action.RuntimeEnv is used as profile.
 // executor may be nil; then actions are only dispatched (no execution).
-func NewEngineImpl(repo persistence.TaskRepository, bus messaging.EventBus, planner Planner, skillResolver SkillResolver, executor runtimeclient.ExecutorClient) *EngineImpl {
-	return &EngineImpl{repo: repo, bus: bus, planner: planner, skillResolver: skillResolver, executor: executor}
+// pol may be nil; then policy checks are skipped.
+// sched may be nil; then the direct executor path is used.
+func NewEngineImpl(
+	repo persistence.TaskRepository,
+	bus messaging.EventBus,
+	planner Planner,
+	skillResolver SkillResolver,
+	executor runtimeclient.ExecutorClient,
+	pol policy.PolicyEngine,
+	sched scheduler.Scheduler,
+) *EngineImpl {
+	return &EngineImpl{
+		repo:          repo,
+		bus:           bus,
+		planner:       planner,
+		skillResolver: skillResolver,
+		executor:      executor,
+		policy:        pol,
+		scheduler:     sched,
+	}
 }
 
-// StartTask creates a task, runs planning, attaches plan, and transitions to Queued.
+// StartTask creates a task, runs planning, attaches plan, and executes or dispatches actions.
 func (e *EngineImpl) StartTask(ctx context.Context, prompt string) (*taskdsl.Task, error) {
 	task := &taskdsl.Task{
 		ID:        fmt.Sprintf("task-%d", time.Now().UnixNano()),
@@ -70,8 +92,42 @@ func (e *EngineImpl) StartTask(ctx context.Context, prompt string) (*taskdsl.Tas
 			}
 		}
 		action.RuntimeEnv = profile
+
+		// Policy check: evaluate before dispatching each action.
+		if e.policy != nil {
+			decision, err := e.policy.Evaluate(ctx, policy.PolicyRequest{
+				AgentName: "",
+				ToolName:  action.Kind,
+				Command:   extractCommand(action),
+			})
+			if err != nil {
+				_ = e.bus.Publish(ctx, "task.action.denied", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Occurred: time.Now()})
+				_ = e.transition(ctx, task, Failed)
+				return task, fmt.Errorf("policy error: %w", err)
+			}
+			if !decision.Allowed {
+				_ = e.bus.Publish(ctx, "task.action.denied", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Occurred: time.Now()})
+				_ = e.transition(ctx, task, Failed)
+				return task, fmt.Errorf("policy denied: %s", decision.Reason)
+			}
+		}
+
 		_ = e.bus.Publish(ctx, "task.action.dispatched", &events.ActionDispatched{TaskID: task.ID, ActionID: action.ID, Occurred: time.Now()})
 
+		// Scheduler path: non-blocking dispatch.
+		if e.scheduler != nil {
+			if err := e.transition(ctx, task, Running); err != nil {
+				return task, err
+			}
+			if err := e.scheduler.Submit(ctx, task.ID, action); err != nil {
+				_ = e.transition(ctx, task, Failed)
+				return task, fmt.Errorf("scheduler submit: %w", err)
+			}
+			// Return immediately; ProcessResults handles completion.
+			return e.repo.Get(ctx, task.ID)
+		}
+
+		// Direct executor path (fallback).
 		if e.executor != nil {
 			if err := e.transition(ctx, task, Running); err != nil {
 				return task, err
@@ -106,6 +162,42 @@ func (e *EngineImpl) StartTask(ctx context.Context, prompt string) (*taskdsl.Tas
 	return e.repo.Get(ctx, task.ID)
 }
 
+// ProcessResults reads completed action results from the scheduler and updates
+// task state accordingly. It blocks until ctx is cancelled. Call in a goroutine.
+func (e *EngineImpl) ProcessResults(ctx context.Context) {
+	if e.scheduler == nil {
+		return
+	}
+	results := e.scheduler.Results()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case result, ok := <-results:
+			if !ok {
+				return
+			}
+			task, err := e.repo.Get(ctx, result.TaskID)
+			if err != nil || task == nil {
+				continue
+			}
+			_ = e.bus.Publish(ctx, "task.action.completed", &events.ActionCompleted{
+				TaskID:   result.TaskID,
+				ActionID: result.ActionID,
+				ExitCode: result.ExitCode,
+				Occurred: time.Now(),
+			})
+			if result.ExitCode != 0 || result.Error != nil {
+				_ = e.transition(ctx, task, Failed)
+			} else {
+				// Transition through evaluating to succeeded.
+				_ = e.transition(ctx, task, Evaluating)
+				_ = e.transition(ctx, task, Succeeded)
+			}
+		}
+	}
+}
+
 func (e *EngineImpl) transition(ctx context.Context, task *taskdsl.Task, to TaskState) error {
 	sm := NewTaskStateMachine()
 	if _, err := sm.Transition(TaskState(task.State), to); err != nil {
@@ -135,4 +227,17 @@ func (e *EngineImpl) Transition(ctx context.Context, taskID string, to TaskState
 // GetTask retrieves a task.
 func (e *EngineImpl) GetTask(ctx context.Context, taskID string) (*taskdsl.Task, error) {
 	return e.repo.Get(ctx, taskID)
+}
+
+// extractCommand pulls a command string from the action payload for policy evaluation.
+func extractCommand(action *taskdsl.Action) string {
+	if action.Payload == nil {
+		return ""
+	}
+	if cmd, ok := action.Payload["cmd"]; ok {
+		if s, ok := cmd.(string); ok {
+			return s
+		}
+	}
+	return ""
 }

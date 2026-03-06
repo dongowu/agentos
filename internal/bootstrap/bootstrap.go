@@ -128,7 +128,10 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		executor = ec
 		closers = append(closers, ec)
 	}
-	engine := orchestration.NewEngineImpl(repo, bus, planner, resolver, executor)
+	engine := orchestration.NewEngineImpl(repo, bus, planner, resolver, executor, policyEngine, sched)
+
+	// Start background result processor for scheduler-dispatched actions.
+	go engine.ProcessResults(ctx)
 
 	app := &App{
 		Config:       cfg,

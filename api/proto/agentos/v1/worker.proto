@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package agentos.v1;
+
+option go_package = "github.com/dongowu/agentos/api/gen/agentos/v1;v1";
+
+service WorkerRegistry {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc Deregister(DeregisterRequest) returns (DeregisterResponse);
+}
+
+message RegisterRequest {
+  string worker_id = 1;
+  string addr = 2;
+  repeated string capabilities = 3;
+  int32 max_tasks = 4;
+}
+
+message RegisterResponse {
+  bool accepted = 1;
+}
+
+message HeartbeatRequest {
+  string worker_id = 1;
+  int32 active_tasks = 2;
+}
+
+message HeartbeatResponse {
+  bool ok = 1;
+}
+
+message DeregisterRequest {
+  string worker_id = 1;
+}
+
+message DeregisterResponse {
+  bool ok = 1;
+}

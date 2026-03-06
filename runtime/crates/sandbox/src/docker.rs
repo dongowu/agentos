@@ -190,7 +190,15 @@ impl RuntimeAdapter for DockerRuntime {
             .map_err(|_| RuntimeError::Timeout {
                 elapsed: spec.timeout,
             })?
-            .map_err(RuntimeError::IoError)?;
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    RuntimeError::ShellNotFound(
+                        "docker binary not found on PATH. Install Docker to use the Docker runtime.".into(),
+                    )
+                } else {
+                    RuntimeError::IoError(e)
+                }
+            })?;
 
         let duration = start.elapsed();
 
