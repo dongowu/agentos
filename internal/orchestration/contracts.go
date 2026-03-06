@@ -3,7 +3,7 @@ package orchestration
 import (
 	"context"
 
-	"github.com/dongowu/ai-orchestrator/pkg/taskdsl"
+	"github.com/dongowu/agentos/pkg/taskdsl"
 )
 
 // PlanInput is the normalized planner input after auth, validation, and request shaping.

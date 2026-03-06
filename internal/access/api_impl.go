@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/dongowu/ai-orchestrator/internal/orchestration"
+	"github.com/dongowu/agentos/internal/orchestration"
 )
 
 // TaskSubmissionAPIImpl implements TaskSubmissionAPI using orchestration.TaskEngine.

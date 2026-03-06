@@ -3,7 +3,7 @@ package runtimeclient
 import (
 	"context"
 
-	"github.com/dongowu/ai-orchestrator/pkg/taskdsl"
+	"github.com/dongowu/agentos/pkg/taskdsl"
 )
 
 // StubExecutorClient returns a zero exit code for tests.

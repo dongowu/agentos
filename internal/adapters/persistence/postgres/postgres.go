@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/dongowu/ai-orchestrator/internal/adapter"
-	"github.com/dongowu/ai-orchestrator/internal/persistence"
-	"github.com/dongowu/ai-orchestrator/pkg/config"
-	"github.com/dongowu/ai-orchestrator/pkg/taskdsl"
+	"github.com/dongowu/agentos/internal/adapter"
+	"github.com/dongowu/agentos/internal/persistence"
+	"github.com/dongowu/agentos/pkg/config"
+	"github.com/dongowu/agentos/pkg/taskdsl"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

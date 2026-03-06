@@ -4,9 +4,9 @@ import (
 	"context"
 	"log"
 
-	"github.com/dongowu/ai-orchestrator/internal/access"
-	"github.com/dongowu/ai-orchestrator/internal/access/http"
-	"github.com/dongowu/ai-orchestrator/internal/bootstrap"
+	"github.com/dongowu/agentos/internal/access"
+	"github.com/dongowu/agentos/internal/access/http"
+	"github.com/dongowu/agentos/internal/bootstrap"
 )
 
 func main() {

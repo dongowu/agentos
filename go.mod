@@ -1,4 +1,4 @@
-module github.com/dongowu/ai-orchestrator
+module github.com/dongowu/agentos
 
 go 1.24.0
 

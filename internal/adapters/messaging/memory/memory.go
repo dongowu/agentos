@@ -4,9 +4,9 @@ import (
 	"context"
 	"sync"
 
-	"github.com/dongowu/ai-orchestrator/internal/adapter"
-	"github.com/dongowu/ai-orchestrator/internal/messaging"
-	"github.com/dongowu/ai-orchestrator/pkg/config"
+	"github.com/dongowu/agentos/internal/adapter"
+	"github.com/dongowu/agentos/internal/messaging"
+	"github.com/dongowu/agentos/pkg/config"
 )
 
 func init() {

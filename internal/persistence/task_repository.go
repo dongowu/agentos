@@ -3,7 +3,7 @@ package persistence
 import (
 	"context"
 
-	"github.com/dongowu/ai-orchestrator/pkg/taskdsl"
+	"github.com/dongowu/agentos/pkg/taskdsl"
 )
 
 // TaskRepository persists tasks, plans, and execution history.

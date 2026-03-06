@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	v1 "github.com/dongowu/ai-orchestrator/api/gen/agentos/v1"
-	"github.com/dongowu/ai-orchestrator/internal/runtimeclient"
-	"github.com/dongowu/ai-orchestrator/pkg/taskdsl"
+	v1 "github.com/dongowu/agentos/api/gen/agentos/v1"
+	"github.com/dongowu/agentos/internal/runtimeclient"
+	"github.com/dongowu/agentos/pkg/taskdsl"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

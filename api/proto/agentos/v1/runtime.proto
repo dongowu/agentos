@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package agentos.v1;
 
-option go_package = "github.com/dongowu/ai-orchestrator/api/gen/agentos/v1;v1";
+option go_package = "github.com/dongowu/agentos/api/gen/agentos/v1;v1";
 
 service RuntimeService {
   rpc ExecuteAction(ExecuteActionRequest) returns (ExecuteActionResponse);

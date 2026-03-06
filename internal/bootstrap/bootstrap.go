@@ -6,16 +6,16 @@ import (
 	"io"
 	"os"
 
-	adapterruntime "github.com/dongowu/ai-orchestrator/internal/adapters/runtimeclient"
-	"github.com/dongowu/ai-orchestrator/internal/adapter"
-	"github.com/dongowu/ai-orchestrator/internal/runtimeclient"
-	"github.com/dongowu/ai-orchestrator/internal/messaging"
-	"github.com/dongowu/ai-orchestrator/internal/orchestration"
-	"github.com/dongowu/ai-orchestrator/internal/persistence"
-	"github.com/dongowu/ai-orchestrator/pkg/config"
+	adapterruntime "github.com/dongowu/agentos/internal/adapters/runtimeclient"
+	"github.com/dongowu/agentos/internal/adapter"
+	"github.com/dongowu/agentos/internal/runtimeclient"
+	"github.com/dongowu/agentos/internal/messaging"
+	"github.com/dongowu/agentos/internal/orchestration"
+	"github.com/dongowu/agentos/internal/persistence"
+	"github.com/dongowu/agentos/pkg/config"
 
 	// Activate all built-in adapter plugins.
-	_ "github.com/dongowu/ai-orchestrator/internal/adapters/defaults"
+	_ "github.com/dongowu/agentos/internal/adapters/defaults"
 )
 
 // App holds wired dependencies.

@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dongowu/ai-orchestrator/internal/messaging"
-	"github.com/dongowu/ai-orchestrator/internal/persistence"
-	"github.com/dongowu/ai-orchestrator/internal/runtimeclient"
-	"github.com/dongowu/ai-orchestrator/pkg/events"
-	"github.com/dongowu/ai-orchestrator/pkg/taskdsl"
+	"github.com/dongowu/agentos/internal/messaging"
+	"github.com/dongowu/agentos/internal/persistence"
+	"github.com/dongowu/agentos/internal/runtimeclient"
+	"github.com/dongowu/agentos/pkg/events"
+	"github.com/dongowu/agentos/pkg/taskdsl"
 )
 
 // EngineImpl implements TaskEngine.

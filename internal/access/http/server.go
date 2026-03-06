@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/dongowu/ai-orchestrator/internal/access"
+	"github.com/dongowu/agentos/internal/access"
 )
 
 // Server exposes the HTTP API for task submission and streaming.
