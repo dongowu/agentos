@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "crates/worker",
+    "crates/sandbox",
+    "crates/telemetry",
+]
+resolver = "2"

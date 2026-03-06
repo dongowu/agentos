@@ -1,0 +1,28 @@
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Editors
+.idea/
+.vscode/
+
+# Go
+bin/
+coverage.out
+*.test
+*.exe
+
+# Rust
+target/
+Cargo.lock
+
+# Local services
+*.db
+*.sqlite
+*.sqlite3
+.tmp/
+dist/

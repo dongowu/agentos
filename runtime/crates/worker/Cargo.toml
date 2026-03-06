@@ -1,0 +1,16 @@
+[package]
+name = "agentos-worker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tonic = "0.11"
+prost = "0.12"
+agentos-sandbox = { path = "../sandbox" }
+tower = "0.4"
+async-stream = "0.3"
+futures = "0.3"
+
+[build-dependencies]
+tonic-build = "0.11"

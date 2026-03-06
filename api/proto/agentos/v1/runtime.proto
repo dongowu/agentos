@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package agentos.v1;
+
+option go_package = "github.com/agentos/agentos/api/gen/agentos/v1;v1";
+
+service RuntimeService {
+  rpc ExecuteAction(ExecuteActionRequest) returns (ExecuteActionResponse);
+  rpc StreamOutput(StreamOutputRequest) returns (stream StreamChunk);
+}
+
+message ExecuteActionRequest {
+  string task_id = 1;
+  string action_id = 2;
+  string runtime_profile = 3;
+  bytes payload = 4;
+}
+
+message ExecuteActionResponse {
+  int32 exit_code = 1;
+  bytes stdout = 2;
+  bytes stderr = 3;
+}
+
+message StreamOutputRequest {
+  string task_id = 1;
+  string action_id = 2;
+}
+
+message StreamChunk {
+  string task_id = 1;
+  string action_id = 2;
+  bytes data = 3;
+  string kind = 4; // stdout, stderr, resource
+}

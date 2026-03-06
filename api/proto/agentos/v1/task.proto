@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package agentos.v1;
+
+option go_package = "github.com/agentos/agentos/api/gen/agentos/v1;v1";
+
+message Task {
+  string id = 1;
+  string prompt = 2;
+  string state = 3;
+}
+
+message Plan {
+  repeated Action actions = 1;
+}
+
+message Action {
+  string id = 1;
+  string kind = 2;
+  string runtime_profile = 3;
+  bytes payload = 4;
+}
