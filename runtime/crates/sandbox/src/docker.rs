@@ -54,11 +54,7 @@ impl DockerRuntime {
     /// Build the `docker run` command line from the spec.
     /// Exposed for testing without actually running Docker.
     pub fn build_command_args(&self, spec: &ExecutionSpec) -> Result<Vec<String>, RuntimeError> {
-        let mut args = vec![
-            "run".into(),
-            "--rm".into(),
-            "--init".into(),
-        ];
+        let mut args = vec!["run".into(), "--rm".into(), "--init".into()];
 
         // Network isolation
         let network = self.config.network.trim();
@@ -86,14 +82,9 @@ impl DockerRuntime {
 
         // Workspace mount
         if self.config.mount_workspace {
-            let workspace = spec
-                .working_dir
-                .as_ref()
-                .ok_or_else(|| {
-                    RuntimeError::Other(
-                        "mount_workspace requires working_dir in ExecutionSpec".into(),
-                    )
-                })?;
+            let workspace = spec.working_dir.as_ref().ok_or_else(|| {
+                RuntimeError::Other("mount_workspace requires working_dir in ExecutionSpec".into())
+            })?;
 
             let resolved = workspace
                 .canonicalize()
@@ -189,6 +180,7 @@ impl RuntimeAdapter for DockerRuntime {
             .await
             .map_err(|_| RuntimeError::Timeout {
                 elapsed: spec.timeout,
+                context: Some("docker"),
             })?
             .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {

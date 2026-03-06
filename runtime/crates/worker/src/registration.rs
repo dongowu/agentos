@@ -57,6 +57,15 @@ pub struct RegistrationClient {
     max_tasks: u32,
 }
 
+fn normalize_control_plane_addr(addr: &str) -> String {
+    let trimmed = addr.trim();
+    if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("http://{trimmed}")
+    }
+}
+
 impl RegistrationClient {
     pub fn new(
         worker_id: String,
@@ -81,7 +90,7 @@ impl RegistrationClient {
     /// Register this worker with the control plane.
     pub async fn register(&self) -> Result<RegisterResponse, RegistrationError> {
         let mut client = crate::proto::worker_registry_client::WorkerRegistryClient::connect(
-            self.control_plane_addr.clone(),
+            normalize_control_plane_addr(&self.control_plane_addr),
         )
         .await?;
 
@@ -102,9 +111,12 @@ impl RegistrationClient {
     }
 
     /// Send a single heartbeat reporting the current active task count.
-    pub async fn heartbeat(&self, active_tasks: u32) -> Result<HeartbeatResponse, RegistrationError> {
+    pub async fn heartbeat(
+        &self,
+        active_tasks: u32,
+    ) -> Result<HeartbeatResponse, RegistrationError> {
         let mut client = crate::proto::worker_registry_client::WorkerRegistryClient::connect(
-            self.control_plane_addr.clone(),
+            normalize_control_plane_addr(&self.control_plane_addr),
         )
         .await?;
 
@@ -121,7 +133,7 @@ impl RegistrationClient {
     /// Deregister this worker from the control plane.
     pub async fn deregister(&self) -> Result<DeregisterResponse, RegistrationError> {
         let mut client = crate::proto::worker_registry_client::WorkerRegistryClient::connect(
-            self.control_plane_addr.clone(),
+            normalize_control_plane_addr(&self.control_plane_addr),
         )
         .await?;
 
@@ -153,7 +165,10 @@ impl RegistrationClient {
                 let count = active_tasks.load(Ordering::Relaxed);
                 match self.heartbeat(count).await {
                     Ok(_) => {
-                        eprintln!("[heartbeat] ok  worker={} active_tasks={count}", self.worker_id);
+                        eprintln!(
+                            "[heartbeat] ok  worker={} active_tasks={count}",
+                            self.worker_id
+                        );
                     }
                     Err(e) => {
                         eprintln!("[heartbeat] err worker={} {e}", self.worker_id);
@@ -406,5 +421,17 @@ mod tests {
         assert!(e.to_string().contains("rejected"));
         let e2 = RegistrationError::Transport("timeout".into());
         assert!(e2.to_string().contains("timeout"));
+    }
+
+    #[test]
+    fn normalize_control_plane_addr_accepts_bare_host_port() {
+        assert_eq!(
+            normalize_control_plane_addr("127.0.0.1:50052"),
+            "http://127.0.0.1:50052"
+        );
+        assert_eq!(
+            normalize_control_plane_addr("http://127.0.0.1:50052"),
+            "http://127.0.0.1:50052"
+        );
     }
 }

@@ -89,11 +89,10 @@ impl WorkerConfig {
     /// - `AGENTOS_HEARTBEAT_INTERVAL_SECS` -- Heartbeat interval (default: `10`)
     /// - `AGENTOS_MAX_CONCURRENT_TASKS` -- Max concurrent tasks (default: `4`)
     pub fn from_env() -> Self {
-        let listen_addr = std::env::var("AGENTOS_LISTEN_ADDR")
-            .unwrap_or_else(|_| "[::1]:50051".into());
+        let listen_addr =
+            std::env::var("AGENTOS_LISTEN_ADDR").unwrap_or_else(|_| "[::1]:50051".into());
 
-        let worker_id = std::env::var("AGENTOS_WORKER_ID")
-            .unwrap_or_else(|_| generate_worker_id());
+        let worker_id = std::env::var("AGENTOS_WORKER_ID").unwrap_or_else(|_| generate_worker_id());
 
         let control_plane_addr = std::env::var("AGENTOS_CONTROL_PLANE_ADDR").ok();
 
@@ -107,12 +106,10 @@ impl WorkerConfig {
             .and_then(|v| v.parse().ok())
             .unwrap_or(4);
 
-        let runtime_kind = std::env::var("AGENTOS_RUNTIME")
-            .unwrap_or_else(|_| "native".into());
+        let runtime_kind = std::env::var("AGENTOS_RUNTIME").unwrap_or_else(|_| "native".into());
 
         let docker = DockerConfig {
-            image: std::env::var("AGENTOS_DOCKER_IMAGE")
-                .unwrap_or_else(|_| "ubuntu:22.04".into()),
+            image: std::env::var("AGENTOS_DOCKER_IMAGE").unwrap_or_else(|_| "ubuntu:22.04".into()),
             memory_limit_mb: std::env::var("AGENTOS_DOCKER_MEMORY_MB")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -121,8 +118,7 @@ impl WorkerConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(1.0),
-            network: std::env::var("AGENTOS_DOCKER_NETWORK")
-                .unwrap_or_else(|_| "none".into()),
+            network: std::env::var("AGENTOS_DOCKER_NETWORK").unwrap_or_else(|_| "none".into()),
             mount_workspace: std::env::var("AGENTOS_DOCKER_MOUNT_WORKSPACE")
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false),

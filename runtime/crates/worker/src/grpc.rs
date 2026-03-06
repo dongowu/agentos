@@ -9,9 +9,7 @@ use std::time::Duration;
 use tonic::{Request, Response, Status};
 
 use proto::runtime_service_server::{RuntimeService, RuntimeServiceServer};
-use proto::{
-    ExecuteActionRequest, ExecuteActionResponse, StreamChunk, StreamOutputRequest,
-};
+use proto::{ExecuteActionRequest, ExecuteActionResponse, StreamChunk, StreamOutputRequest};
 
 /// Payload schema expected in ExecuteActionRequest.payload (JSON).
 #[derive(serde::Deserialize)]

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/dongowu/agentos/internal/memory"
 	"github.com/dongowu/agentos/internal/messaging"
 	"github.com/dongowu/agentos/internal/persistence"
 	"github.com/dongowu/agentos/internal/policy"
@@ -23,6 +24,8 @@ type EngineImpl struct {
 	executor      runtimeclient.ExecutorClient // fallback for direct execution
 	policy        policy.PolicyEngine          // nil = skip policy checks
 	scheduler     scheduler.Scheduler          // nil = use direct executor
+	memoryHook    *MemoryHook
+	vault         policy.CredentialVault
 }
 
 // NewEngineImpl returns a new task engine.
@@ -45,16 +48,33 @@ func NewEngineImpl(
 		planner:       planner,
 		skillResolver: skillResolver,
 		executor:      executor,
-		policy:        pol,
-		scheduler:     sched,
-	}
+			policy:        pol,
+			scheduler:     sched,
+		}
+}
+
+// WithMemoryHook attaches a memory hook to the engine.
+func (e *EngineImpl) WithMemoryHook(hook *MemoryHook) *EngineImpl {
+	e.memoryHook = hook
+	return e
+}
+
+// WithVault attaches a credential vault to the engine.
+func (e *EngineImpl) WithVault(vault policy.CredentialVault) *EngineImpl {
+	e.vault = vault
+	return e
 }
 
 // StartTask creates a task, runs planning, attaches plan, and executes or dispatches actions.
 func (e *EngineImpl) StartTask(ctx context.Context, prompt string) (*taskdsl.Task, error) {
+	return e.StartTaskWithInput(ctx, StartTaskInput{Prompt: prompt})
+}
+
+// StartTaskWithInput creates a task with richer execution context.
+func (e *EngineImpl) StartTaskWithInput(ctx context.Context, input StartTaskInput) (*taskdsl.Task, error) {
 	task := &taskdsl.Task{
 		ID:        fmt.Sprintf("task-%d", time.Now().UnixNano()),
-		Prompt:    prompt,
+		Prompt:    input.Prompt,
 		State:     string(Pending),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -62,13 +82,20 @@ func (e *EngineImpl) StartTask(ctx context.Context, prompt string) (*taskdsl.Tas
 	if err := e.repo.Create(ctx, task); err != nil {
 		return nil, err
 	}
-	_ = e.bus.Publish(ctx, "task.created", &events.TaskCreated{TaskID: task.ID, Prompt: prompt, Occurred: time.Now()})
+	_ = e.bus.Publish(ctx, "task.created", &events.TaskCreated{TaskID: task.ID, Prompt: input.Prompt, Occurred: time.Now()})
 
 	if err := e.transition(ctx, task, Planning); err != nil {
 		return task, err
 	}
 
-	plan, err := e.planner.Plan(ctx, PlanInput{TaskID: task.ID, Prompt: prompt})
+	planningPrompt := input.Prompt
+	if e.memoryHook != nil {
+		if recalled, err := e.memoryHook.RecallContext(ctx, input.Prompt, 3); err == nil && len(recalled) > 0 {
+			planningPrompt = augmentPlanningPrompt(input.Prompt, recalled)
+		}
+	}
+
+	plan, err := e.planner.Plan(ctx, PlanInput{TaskID: task.ID, Prompt: planningPrompt, TenantID: input.TenantID})
 	if err != nil {
 		return task, fmt.Errorf("plan: %w", err)
 	}
@@ -84,8 +111,8 @@ func (e *EngineImpl) StartTask(ctx context.Context, prompt string) (*taskdsl.Tas
 	}
 
 	for i := range plan.Actions {
-		action := &plan.Actions[i]
-		profile := action.RuntimeEnv
+			action := &plan.Actions[i]
+			profile := action.RuntimeEnv
 		if e.skillResolver != nil {
 			if p, err := e.skillResolver.Resolve(action); err == nil {
 				profile = p
@@ -93,13 +120,16 @@ func (e *EngineImpl) StartTask(ctx context.Context, prompt string) (*taskdsl.Tas
 		}
 		action.RuntimeEnv = profile
 
-		// Policy check: evaluate before dispatching each action.
-		if e.policy != nil {
-			decision, err := e.policy.Evaluate(ctx, policy.PolicyRequest{
-				AgentName: "",
-				ToolName:  action.Kind,
-				Command:   extractCommand(action),
-			})
+			injectCredentialToken(ctx, e.vault, input.AgentName, action)
+
+			// Policy check: evaluate before dispatching each action.
+			if e.policy != nil {
+				decision, err := e.policy.Evaluate(ctx, policy.PolicyRequest{
+					AgentName: input.AgentName,
+					ToolName:  action.Kind,
+					Command:   extractCommand(action),
+					TenantID:  input.TenantID,
+				})
 			if err != nil {
 				_ = e.bus.Publish(ctx, "task.action.denied", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Occurred: time.Now()})
 				_ = e.transition(ctx, task, Failed)
@@ -120,6 +150,13 @@ func (e *EngineImpl) StartTask(ctx context.Context, prompt string) (*taskdsl.Tas
 				return task, err
 			}
 			if err := e.scheduler.Submit(ctx, task.ID, action); err != nil {
+				if e.executor != nil {
+					result, execErr := e.executeDirect(ctx, task, action)
+					if execErr != nil {
+						return task, fmt.Errorf("scheduler submit: %w; direct execute: %w", err, execErr)
+					}
+					return result, nil
+				}
 				_ = e.transition(ctx, task, Failed)
 				return task, fmt.Errorf("scheduler submit: %w", err)
 			}
@@ -129,34 +166,16 @@ func (e *EngineImpl) StartTask(ctx context.Context, prompt string) (*taskdsl.Tas
 
 		// Direct executor path (fallback).
 		if e.executor != nil {
-			if err := e.transition(ctx, task, Running); err != nil {
-				return task, err
-			}
-			result, err := e.executor.ExecuteAction(ctx, task.ID, action)
+			result, err := e.executeDirect(ctx, task, action)
 			if err != nil {
-				_ = e.bus.Publish(ctx, "task.action.completed", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Occurred: time.Now()})
-				if err := e.transition(ctx, task, Failed); err != nil {
-					return task, err
-				}
-				return e.repo.Get(ctx, task.ID)
-			}
-			_ = e.bus.Publish(ctx, "task.action.completed", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: result.ExitCode, Occurred: time.Now()})
-			if err := e.transition(ctx, task, Evaluating); err != nil {
 				return task, err
 			}
-			if result.ExitCode != 0 {
-				if err := e.transition(ctx, task, Failed); err != nil {
-					return task, err
-				}
-				return e.repo.Get(ctx, task.ID)
-			}
+			return result, nil
 		}
 	}
 
 	if e.executor != nil && len(plan.Actions) > 0 {
-		if err := e.transition(ctx, task, Succeeded); err != nil {
-			return task, err
-		}
+		return e.repo.Get(ctx, task.ID)
 	}
 
 	return e.repo.Get(ctx, task.ID)
@@ -194,6 +213,15 @@ func (e *EngineImpl) ProcessResults(ctx context.Context) {
 				_ = e.transition(ctx, task, Evaluating)
 				_ = e.transition(ctx, task, Succeeded)
 			}
+			if e.memoryHook != nil {
+				_ = e.memoryHook.StoreResult(ctx, result.TaskID, map[string]any{
+					"action_id": result.ActionID,
+					"exit_code": result.ExitCode,
+					"stdout":    string(result.Stdout),
+					"stderr":    string(result.Stderr),
+					"worker_id": result.WorkerID,
+				})
+			}
 		}
 	}
 }
@@ -229,12 +257,93 @@ func (e *EngineImpl) GetTask(ctx context.Context, taskID string) (*taskdsl.Task,
 	return e.repo.Get(ctx, taskID)
 }
 
+func (e *EngineImpl) executeDirect(ctx context.Context, task *taskdsl.Task, action *taskdsl.Action) (*taskdsl.Task, error) {
+	if TaskState(task.State) != Running {
+		if err := e.transition(ctx, task, Running); err != nil {
+			return task, err
+		}
+	}
+	result, err := e.executor.ExecuteAction(ctx, task.ID, action)
+	if err != nil {
+		_ = e.bus.Publish(ctx, "task.action.completed", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Occurred: time.Now()})
+		if err := e.transition(ctx, task, Failed); err != nil {
+			return task, err
+		}
+		return e.repo.Get(ctx, task.ID)
+	}
+	_ = e.bus.Publish(ctx, "task.action.completed", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: result.ExitCode, Occurred: time.Now()})
+	if err := e.transition(ctx, task, Evaluating); err != nil {
+		return task, err
+	}
+	if result.ExitCode != 0 {
+		if err := e.transition(ctx, task, Failed); err != nil {
+			return task, err
+		}
+		if e.memoryHook != nil {
+			_ = e.memoryHook.StoreResult(ctx, task.ID, map[string]any{
+				"action_id": action.ID,
+				"exit_code": result.ExitCode,
+				"stdout":    string(result.Stdout),
+				"stderr":    string(result.Stderr),
+			})
+		}
+		return e.repo.Get(ctx, task.ID)
+	}
+	if err := e.transition(ctx, task, Succeeded); err != nil {
+		return task, err
+	}
+	if e.memoryHook != nil {
+		_ = e.memoryHook.StoreResult(ctx, task.ID, map[string]any{
+			"action_id": action.ID,
+			"exit_code": result.ExitCode,
+			"stdout":    string(result.Stdout),
+			"stderr":    string(result.Stderr),
+		})
+	}
+	return e.repo.Get(ctx, task.ID)
+}
+
+func augmentPlanningPrompt(prompt string, recalled []memory.SearchResult) string {
+	if len(recalled) == 0 {
+		return prompt
+	}
+	contextBlock := "\n\nRelevant past context:\n"
+	for _, item := range recalled {
+		contextBlock += "- " + string(item.Content) + "\n"
+	}
+	return prompt + contextBlock
+}
+
+func injectCredentialToken(ctx context.Context, vault policy.CredentialVault, agentName string, action *taskdsl.Action) {
+	if vault == nil || agentName == "" || action == nil {
+		return
+	}
+	token, err := vault.GetToken(ctx, agentName)
+	if err != nil || token == "" {
+		return
+	}
+	if action.Payload == nil {
+		action.Payload = map[string]any{}
+	}
+	env, ok := action.Payload["env"].(map[string]any)
+	if !ok || env == nil {
+		env = map[string]any{}
+	}
+	env["AGENTOS_CREDENTIAL_TOKEN"] = token
+	action.Payload["env"] = env
+}
+
 // extractCommand pulls a command string from the action payload for policy evaluation.
 func extractCommand(action *taskdsl.Action) string {
 	if action.Payload == nil {
 		return ""
 	}
 	if cmd, ok := action.Payload["cmd"]; ok {
+		if s, ok := cmd.(string); ok {
+			return s
+		}
+	}
+	if cmd, ok := action.Payload["command"]; ok {
 		if s, ok := cmd.(string); ok {
 			return s
 		}

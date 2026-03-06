@@ -1,7 +1,7 @@
 //! Integration tests for NativeRuntime.
 
-use agentos_sandbox::{ExecutionSpec, RuntimeAdapter};
 use agentos_sandbox::native::NativeRuntime;
+use agentos_sandbox::{ExecutionSpec, RuntimeAdapter};
 use std::time::Duration;
 
 #[tokio::test]
@@ -84,7 +84,10 @@ async fn native_output_truncation() {
         max_output_bytes: 100,
         ..ExecutionSpec::default()
     };
-    let result = rt.execute(spec).await.expect("truncation test should succeed");
+    let result = rt
+        .execute(spec)
+        .await
+        .expect("truncation test should succeed");
     assert!(result.truncated);
     // Output should be approximately max_output_bytes
     assert!(result.stdout.len() < 200);

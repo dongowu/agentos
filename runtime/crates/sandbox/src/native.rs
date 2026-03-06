@@ -132,12 +132,11 @@ impl RuntimeAdapter for NativeRuntime {
     }
 
     async fn execute(&self, spec: ExecutionSpec) -> Result<ExecutionResult, RuntimeError> {
-        let shell = self
-            .shell
-            .as_ref()
-            .ok_or_else(|| RuntimeError::ShellNotFound(
+        let shell = self.shell.as_ref().ok_or_else(|| {
+            RuntimeError::ShellNotFound(
                 "no usable shell found (tried: sh, bash). Install a POSIX shell on PATH.".into(),
-            ))?;
+            )
+        })?;
 
         let mut cmd = tokio::process::Command::new(&shell.program);
         shell.add_args(&mut cmd, &spec.command);
@@ -167,6 +166,7 @@ impl RuntimeAdapter for NativeRuntime {
             .await
             .map_err(|_| RuntimeError::Timeout {
                 elapsed: spec.timeout,
+                context: None,
             })?
             .map_err(RuntimeError::IoError)?;
 

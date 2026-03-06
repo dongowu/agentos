@@ -115,7 +115,10 @@ pub mod worker_registry_client {
     impl WorkerRegistryClient<tonic::transport::Channel> {
         /// Connect to a WorkerRegistry gRPC server at `dst`.
         pub async fn connect(
-            dst: impl TryInto<tonic::transport::Endpoint, Error: Into<Box<dyn std::error::Error + Send + Sync>>>,
+            dst: impl TryInto<
+                tonic::transport::Endpoint,
+                Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+            >,
         ) -> Result<Self, tonic::transport::Error> {
             let conn = tonic::transport::Endpoint::new(dst)?.connect().await?;
             Ok(Self { inner: conn })
@@ -127,7 +130,8 @@ pub mod worker_registry_client {
         T: tonic::client::GrpcService<tonic::body::BoxBody> + Clone,
         T::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
         T::ResponseBody: tonic::codegen::Body<Data = tonic::codegen::Bytes> + Send + 'static,
-        <T::ResponseBody as tonic::codegen::Body>::Error: Into<Box<dyn std::error::Error + Send + Sync>> + Send,
+        <T::ResponseBody as tonic::codegen::Body>::Error:
+            Into<Box<dyn std::error::Error + Send + Sync>> + Send,
     {
         pub fn new(inner: T) -> Self {
             Self { inner }
@@ -143,7 +147,10 @@ pub mod worker_registry_client {
             );
             let mut grpc = tonic::client::Grpc::new(self.inner.clone());
             grpc.ready().await.map_err(|e| {
-                tonic::Status::new(tonic::Code::Unknown, format!("Service not ready: {}", e.into()))
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service not ready: {}", e.into()),
+                )
             })?;
             grpc.unary(request.into_request(), path, codec).await
         }
@@ -158,7 +165,10 @@ pub mod worker_registry_client {
             );
             let mut grpc = tonic::client::Grpc::new(self.inner.clone());
             grpc.ready().await.map_err(|e| {
-                tonic::Status::new(tonic::Code::Unknown, format!("Service not ready: {}", e.into()))
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service not ready: {}", e.into()),
+                )
             })?;
             grpc.unary(request.into_request(), path, codec).await
         }
@@ -173,7 +183,10 @@ pub mod worker_registry_client {
             );
             let mut grpc = tonic::client::Grpc::new(self.inner.clone());
             grpc.ready().await.map_err(|e| {
-                tonic::Status::new(tonic::Code::Unknown, format!("Service not ready: {}", e.into()))
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service not ready: {}", e.into()),
+                )
             })?;
             grpc.unary(request.into_request(), path, codec).await
         }
@@ -206,6 +219,7 @@ pub mod worker_registry_server {
 /// Generated server implementations.
 pub mod runtime_service_server {
     use super::*;
+    use tonic::codegen::http;
 
     #[tonic::async_trait]
     pub trait RuntimeService: Send + Sync + 'static {
@@ -245,15 +259,17 @@ pub mod runtime_service_server {
         }
     }
 
-    // Service impl matches tonic 0.11's add_service signature:
-    // Service<Request<Body>, Response = Response<BoxBody>, Error = Infallible>
-    impl<T: RuntimeService> tonic::codegen::Service<tonic::codegen::http::Request<tonic::transport::Body>>
+    impl<T: RuntimeService>
+        tonic::codegen::Service<tonic::codegen::http::Request<tonic::transport::Body>>
         for RuntimeServiceServer<T>
     {
         type Response = tonic::codegen::http::Response<tonic::body::BoxBody>;
         type Error = std::convert::Infallible;
         type Future = std::pin::Pin<
-            Box<dyn std::future::Future<Output = std::result::Result<Self::Response, Self::Error>> + Send>,
+            Box<
+                dyn std::future::Future<Output = std::result::Result<Self::Response, Self::Error>>
+                    + Send,
+            >,
         >;
 
         fn poll_ready(
@@ -265,22 +281,90 @@ pub mod runtime_service_server {
 
         fn call(
             &mut self,
-            _req: tonic::codegen::http::Request<tonic::transport::Body>,
+            req: tonic::codegen::http::Request<tonic::transport::Body>,
         ) -> Self::Future {
-            // Wire-level gRPC frame decoding is handled by tonic in production
-            // via protoc-generated code. This hand-written server returns
-            // UNIMPLEMENTED for wire-level calls. The RuntimeService trait
-            // methods are tested directly in grpc.rs tests.
-            Box::pin(async {
-                let resp = tonic::codegen::http::Response::builder()
-                    .status(200)
-                    .header("content-type", "application/grpc")
-                    .header("grpc-status", "12") // UNIMPLEMENTED
-                    .header("grpc-message", "use protoc-generated server for wire gRPC")
-                    .body(tonic::body::empty_body())
-                    .unwrap();
-                Ok(resp)
-            })
+            let inner = self.inner.clone();
+
+            match req.uri().path() {
+                "/agentos.v1.RuntimeService/ExecuteAction" => {
+                    struct ExecuteActionSvc<T: RuntimeService>(pub std::sync::Arc<T>);
+
+                    impl<T: RuntimeService> tonic::server::UnaryService<ExecuteActionRequest>
+                        for ExecuteActionSvc<T>
+                    {
+                        type Response = ExecuteActionResponse;
+                        type Future = std::pin::Pin<
+                            Box<
+                                dyn std::future::Future<
+                                        Output = std::result::Result<
+                                            tonic::Response<Self::Response>,
+                                            tonic::Status,
+                                        >,
+                                    > + Send,
+                            >,
+                        >;
+
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<ExecuteActionRequest>,
+                        ) -> Self::Future {
+                            let inner = self.0.clone();
+                            Box::pin(async move { (*inner).execute_action(request).await })
+                        }
+                    }
+
+                    Box::pin(async move {
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec);
+                        let res = grpc.unary(ExecuteActionSvc(inner), req).await;
+                        Ok(res)
+                    })
+                }
+                "/agentos.v1.RuntimeService/StreamOutput" => {
+                    struct StreamOutputSvc<T: RuntimeService>(pub std::sync::Arc<T>);
+
+                    impl<T: RuntimeService> tonic::server::ServerStreamingService<StreamOutputRequest>
+                        for StreamOutputSvc<T>
+                    {
+                        type Response = StreamChunk;
+                        type ResponseStream = T::StreamOutputStream;
+                        type Future = std::pin::Pin<
+                            Box<
+                                dyn std::future::Future<
+                                        Output = std::result::Result<
+                                            tonic::Response<Self::ResponseStream>,
+                                            tonic::Status,
+                                        >,
+                                    > + Send,
+                            >,
+                        >;
+
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<StreamOutputRequest>,
+                        ) -> Self::Future {
+                            let inner = self.0.clone();
+                            Box::pin(async move { (*inner).stream_output(request).await })
+                        }
+                    }
+
+                    Box::pin(async move {
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec);
+                        let res = grpc.server_streaming(StreamOutputSvc(inner), req).await;
+                        Ok(res)
+                    })
+                }
+                _ => Box::pin(async move {
+                    let resp = http::Response::builder()
+                        .status(200)
+                        .header("content-type", "application/grpc")
+                        .header("grpc-status", "12")
+                        .body(tonic::body::empty_body())
+                        .unwrap();
+                    Ok(resp)
+                }),
+            }
         }
     }
 

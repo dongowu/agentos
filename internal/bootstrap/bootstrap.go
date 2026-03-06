@@ -7,37 +7,35 @@ import (
 	"os"
 	"time"
 
-	adapterruntime "github.com/dongowu/agentos/internal/adapters/runtimeclient"
-	"github.com/dongowu/agentos/internal/adapters/llm/openai"
 	"github.com/dongowu/agentos/internal/adapter"
+	"github.com/dongowu/agentos/internal/adapters/llm/openai"
+	adapterruntime "github.com/dongowu/agentos/internal/adapters/runtimeclient"
 	"github.com/dongowu/agentos/internal/agent"
 	"github.com/dongowu/agentos/internal/memory"
 	membuilder "github.com/dongowu/agentos/internal/memory/builder"
+	"github.com/dongowu/agentos/internal/messaging"
+	"github.com/dongowu/agentos/internal/orchestration"
+	"github.com/dongowu/agentos/internal/persistence"
 	"github.com/dongowu/agentos/internal/policy"
 	"github.com/dongowu/agentos/internal/runtimeclient"
 	"github.com/dongowu/agentos/internal/scheduler"
 	"github.com/dongowu/agentos/internal/worker"
-	"github.com/dongowu/agentos/internal/messaging"
-	"github.com/dongowu/agentos/internal/orchestration"
-	"github.com/dongowu/agentos/internal/persistence"
 	"github.com/dongowu/agentos/pkg/config"
 
-	// Activate all built-in adapter plugins.
 	_ "github.com/dongowu/agentos/internal/adapters/defaults"
-	// Activate all built-in tool plugins.
 	_ "github.com/dongowu/agentos/internal/tool/builtin"
 )
 
 // App holds wired dependencies.
 type App struct {
-	Config       config.Config
-	Repo         persistence.TaskRepository
-	Bus          messaging.EventBus
-	Engine       orchestration.TaskEngine
-	Planner      orchestration.Planner
-	Resolver     orchestration.SkillResolver
-	Memory       memory.Provider
-	AgentManager *agent.Manager
+	Config         config.Config
+	Repo           persistence.TaskRepository
+	Bus            messaging.EventBus
+	Engine         orchestration.TaskEngine
+	Planner        orchestration.Planner
+	Resolver       orchestration.SkillResolver
+	Memory         memory.Provider
+	AgentManager   *agent.Manager
 	Policy         policy.PolicyEngine
 	Vault          policy.CredentialVault
 	WorkerRegistry worker.Registry
@@ -45,8 +43,23 @@ type App struct {
 	closers        []io.Closer
 }
 
+func plannerFromConfig(cfg config.Config) orchestration.Planner {
+	if cfg.LLM.Provider == "openai" && cfg.LLM.APIKey != "" {
+		baseURL := cfg.LLM.BaseURL
+		if baseURL == "" {
+			baseURL = "https://api.openai.com"
+		}
+		model := cfg.LLM.Model
+		if model == "" {
+			model = "gpt-4o"
+		}
+		llmClient := openai.NewClient(baseURL, cfg.LLM.APIKey)
+		return orchestration.NewLLMPlanner(llmClient, model)
+	}
+	return &orchestration.PromptPlanner{}
+}
+
 // New builds an App from config.
-// Use FromEnv to load config from AGENTOS_MODE (dev=memory adapters, else nats+postgres).
 func New(ctx context.Context, cfg config.Config) (*App, error) {
 	bus, err := adapter.NewEventBus(cfg.Messaging)
 	if err != nil {
@@ -58,19 +71,9 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		return nil, fmt.Errorf("task repository: %w", err)
 	}
 
-	// Planner: LLM-backed or stub.
-	var planner orchestration.Planner
-	switch cfg.LLM.Provider {
-	case "openai":
-		llmClient := openai.NewClient(cfg.LLM.BaseURL, cfg.LLM.APIKey)
-		planner = orchestration.NewLLMPlanner(llmClient, cfg.LLM.Model)
-	default:
-		planner = &orchestration.StubPlanner{}
-	}
-
+	planner := plannerFromConfig(cfg)
 	resolver := &orchestration.StubSkillResolver{}
 
-	// Memory provider.
 	memOpts := map[string]any{}
 	if cfg.Memory.TTL != "" {
 		memOpts["ttl"] = cfg.Memory.TTL
@@ -85,21 +88,16 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	if memProv == nil {
 		memProv, _ = membuilder.NewProvider("inmemory", nil)
 	}
+	memoryHook := orchestration.NewMemoryHook(memProv)
 
-	// Agent manager.
 	agentMgr := agent.NewManager()
 	if cfg.AgentDir != "" {
-		// Best-effort load; ignore errors if dir doesn't exist.
 		_ = agentMgr.LoadFromDir(cfg.AgentDir)
 	}
 
-	// Policy engine.
 	var policyRules []policy.Rule
 	for _, r := range cfg.Policy.Rules {
-		policyRules = append(policyRules, policy.Rule{
-			Agent:   r.Agent,
-			Actions: policy.Actions{Allow: r.Allow, Deny: r.Deny},
-		})
+		policyRules = append(policyRules, policy.Rule{Agent: r.Agent, Actions: policy.Actions{Allow: r.Allow, Deny: r.Deny}})
 	}
 	policyEngine := policy.NewDefaultEngine(policy.Config{
 		Rules:           policyRules,
@@ -107,19 +105,28 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		RateLimit:       policy.RateLimitConfig{MaxActionsPerHour: cfg.Policy.RateLimit},
 	})
 
-	// Credential vault (in-memory for MVP).
-	vault := policy.NewInMemoryVault(map[string]string{})
+	vault := policy.NewInMemoryVault(cfg.Vault.AgentSecrets)
 
-	// Worker registry and pool.
-	workerReg := worker.NewMemoryRegistry(30 * time.Second)
-	workerPool := worker.NewPool(workerReg, nil) // nil dialer = default gRPC dialer
+	heartbeatTimeout := durationOrDefault(cfg.Scheduler.HeartbeatTimeout, 30*time.Second)
+	var closers []io.Closer
+	var workerReg worker.Registry
+	if cfg.Scheduler.ControlPlaneAddr != "" {
+		remoteReg, err := worker.NewRemoteRegistry(ctx, cfg.Scheduler.ControlPlaneAddr)
+		if err != nil {
+			return nil, fmt.Errorf("worker registry: %w", err)
+		}
+		workerReg = remoteReg
+		closers = append(closers, remoteReg)
+	} else {
+		workerReg = worker.NewMemoryRegistry(heartbeatTimeout)
+	}
+	workerPool := worker.NewPool(workerReg, worker.NewGRPCDialer())
+	closers = append(closers, workerPool)
 
-	// Scheduler.
-	var sched scheduler.Scheduler
-	sched = scheduler.NewLocalScheduler(workerPool)
+	sched := scheduler.NewLocalScheduler(workerPool)
+	closers = append(closers, sched)
 
 	var executor runtimeclient.ExecutorClient
-	var closers []io.Closer
 	if addr := cfg.Runtime.WorkerAddr; addr != "" {
 		ec, err := adapterruntime.NewGRPCExecutorClient(ctx, addr)
 		if err != nil {
@@ -128,20 +135,21 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		executor = ec
 		closers = append(closers, ec)
 	}
-	engine := orchestration.NewEngineImpl(repo, bus, planner, resolver, executor, policyEngine, sched)
+	engine := orchestration.NewEngineImpl(repo, bus, planner, resolver, executor, policyEngine, sched).
+		WithMemoryHook(memoryHook).
+		WithVault(vault)
 
-	// Start background result processor for scheduler-dispatched actions.
 	go engine.ProcessResults(ctx)
 
 	app := &App{
-		Config:       cfg,
-		Repo:         repo,
-		Bus:          bus,
-		Engine:       engine,
-		Planner:      planner,
-		Resolver:     resolver,
-		Memory:       memProv,
-		AgentManager: agentMgr,
+		Config:         cfg,
+		Repo:           repo,
+		Bus:            bus,
+		Engine:         engine,
+		Planner:        planner,
+		Resolver:       resolver,
+		Memory:         memProv,
+		AgentManager:   agentMgr,
 		Policy:         policyEngine,
 		Vault:          vault,
 		WorkerRegistry: workerReg,
@@ -169,11 +177,22 @@ func (a *App) Close() error {
 }
 
 // FromEnv builds an App from environment.
-// AGENTOS_MODE=dev uses memory adapters; otherwise uses NATS + Postgres.
 func FromEnv(ctx context.Context) (*App, error) {
 	cfg := config.Default()
 	if os.Getenv("AGENTOS_MODE") == "dev" {
 		cfg = config.Dev()
 	}
+	cfg = config.ApplyEnvOverrides(cfg)
 	return New(ctx, cfg)
+}
+
+func durationOrDefault(raw string, fallback time.Duration) time.Duration {
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return fallback
+	}
+	return d
 }

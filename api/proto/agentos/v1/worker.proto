@@ -8,6 +8,7 @@ service WorkerRegistry {
   rpc Register(RegisterRequest) returns (RegisterResponse);
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
   rpc Deregister(DeregisterRequest) returns (DeregisterResponse);
+  rpc ListWorkers(ListWorkersRequest) returns (ListWorkersResponse);
 }
 
 message RegisterRequest {
@@ -36,4 +37,22 @@ message DeregisterRequest {
 
 message DeregisterResponse {
   bool ok = 1;
+}
+
+message ListWorkersRequest {
+  bool available_only = 1;
+}
+
+message WorkerSnapshot {
+  string worker_id = 1;
+  string addr = 2;
+  repeated string capabilities = 3;
+  string status = 4;
+  int32 active_tasks = 5;
+  int32 max_tasks = 6;
+  int64 last_heartbeat_unix = 7;
+}
+
+message ListWorkersResponse {
+  repeated WorkerSnapshot workers = 1;
 }

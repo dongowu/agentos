@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"log"
 
 	"github.com/dongowu/agentos/internal/runtimeclient"
 	"github.com/dongowu/agentos/pkg/taskdsl"
@@ -36,12 +37,16 @@ func (s *LocalScheduler) Submit(ctx context.Context, taskID string, action *task
 		return err
 	}
 
-	go s.dispatch(ctx, workerID, taskID, action)
+	dispatchCtx := context.WithoutCancel(ctx)
+	go s.dispatch(dispatchCtx, workerID, taskID, action)
 	return nil
 }
 
 func (s *LocalScheduler) dispatch(ctx context.Context, workerID, taskID string, action *taskdsl.Action) {
 	result, err := s.pool.Execute(ctx, workerID, taskID, action)
+	if err != nil {
+		log.Printf("scheduler dispatch failed task=%s action=%s worker=%s: %v", taskID, action.ID, workerID, err)
+	}
 
 	ar := ActionResult{
 		TaskID:   taskID,

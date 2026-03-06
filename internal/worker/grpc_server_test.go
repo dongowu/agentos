@@ -9,9 +9,10 @@ import (
 	pb "github.com/dongowu/agentos/api/gen/agentos/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
 )
 
-// startTestServer boots a gRPC server with a MemoryRegistry on a random port.
+// startTestServer boots a gRPC server with a MemoryRegistry using an in-memory listener.
 // Returns the client connection and a cleanup function.
 func startTestServer(t *testing.T) (pb.WorkerRegistryClient, func()) {
 	t.Helper()
@@ -20,15 +21,15 @@ func startTestServer(t *testing.T) (pb.WorkerRegistryClient, func()) {
 	srv := grpc.NewServer()
 	pb.RegisterWorkerRegistryServer(srv, NewRegistryServer(reg))
 
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	lis := bufconn.Listen(1024 * 1024)
 	go func() { _ = srv.Serve(lis) }()
 
-	conn, err := grpc.NewClient(
-		lis.Addr().String(),
+	conn, err := grpc.DialContext(
+		context.Background(),
+		"bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return lis.Dial()
+		}),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
@@ -38,8 +39,9 @@ func startTestServer(t *testing.T) (pb.WorkerRegistryClient, func()) {
 
 	client := pb.NewWorkerRegistryClient(conn)
 	cleanup := func() {
-		conn.Close()
+		_ = conn.Close()
 		srv.Stop()
+		_ = lis.Close()
 	}
 	return client, cleanup
 }
@@ -96,7 +98,6 @@ func TestHeartbeat(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Register first.
 	_, err := client.Register(ctx, &pb.RegisterRequest{
 		WorkerId: "w-hb",
 		Addr:     "127.0.0.1:9002",
@@ -181,7 +182,6 @@ func TestFullLifecycle(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Register
 	regResp, err := client.Register(ctx, &pb.RegisterRequest{
 		WorkerId:     "w-full",
 		Addr:         "127.0.0.1:9004",
@@ -195,7 +195,6 @@ func TestFullLifecycle(t *testing.T) {
 		t.Fatal("register should be accepted")
 	}
 
-	// Heartbeat
 	hbResp, err := client.Heartbeat(ctx, &pb.HeartbeatRequest{
 		WorkerId:    "w-full",
 		ActiveTasks: 1,
@@ -207,7 +206,6 @@ func TestFullLifecycle(t *testing.T) {
 		t.Fatal("heartbeat should be ok")
 	}
 
-	// Deregister
 	deregResp, err := client.Deregister(ctx, &pb.DeregisterRequest{
 		WorkerId: "w-full",
 	})
@@ -218,7 +216,6 @@ func TestFullLifecycle(t *testing.T) {
 		t.Fatal("deregister should be ok")
 	}
 
-	// Heartbeat after deregister should fail
 	hbResp2, err := client.Heartbeat(ctx, &pb.HeartbeatRequest{
 		WorkerId:    "w-full",
 		ActiveTasks: 0,
@@ -228,5 +225,34 @@ func TestFullLifecycle(t *testing.T) {
 	}
 	if hbResp2.Ok {
 		t.Fatal("heartbeat after deregister should return Ok=false")
+	}
+}
+
+func TestListWorkers(t *testing.T) {
+	client, cleanup := startTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	_, _ = client.Register(ctx, &pb.RegisterRequest{WorkerId: "w-1", Addr: "127.0.0.1:9001", MaxTasks: 2})
+	_, _ = client.Register(ctx, &pb.RegisterRequest{WorkerId: "w-2", Addr: "127.0.0.1:9002", MaxTasks: 2})
+	_, _ = client.Heartbeat(ctx, &pb.HeartbeatRequest{WorkerId: "w-1", ActiveTasks: 2})
+
+	resp, err := client.ListWorkers(ctx, &pb.ListWorkersRequest{AvailableOnly: false})
+	if err != nil {
+		t.Fatalf("ListWorkers RPC failed: %v", err)
+	}
+	if len(resp.Workers) != 2 {
+		t.Fatalf("expected 2 workers, got %d", len(resp.Workers))
+	}
+
+	available, err := client.ListWorkers(ctx, &pb.ListWorkersRequest{AvailableOnly: true})
+	if err != nil {
+		t.Fatalf("ListWorkers available RPC failed: %v", err)
+	}
+	if len(available.Workers) != 1 {
+		t.Fatalf("expected 1 available worker, got %d", len(available.Workers))
+	}
+	if available.Workers[0].WorkerId != "w-2" {
+		t.Fatalf("expected w-2 to be available, got %s", available.Workers[0].WorkerId)
 	}
 }

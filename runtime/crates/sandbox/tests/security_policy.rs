@@ -161,7 +161,8 @@ fn redact_key_value_pair() {
 #[test]
 fn safe_output_not_redacted() {
     let policy = SecurityPolicy::default();
-    let input = "total 42\ndrwxr-xr-x 2 user user 4096 Jan 1 src\n-rw-r--r-- 1 user user 100 main.rs";
+    let input =
+        "total 42\ndrwxr-xr-x 2 user user 4096 Jan 1 src\n-rw-r--r-- 1 user user 100 main.rs";
     let output = policy.redact_secrets(input);
     assert_eq!(output, input);
 }

@@ -36,6 +36,7 @@ type mockScheduler struct {
 	submitted []schedulerEntry
 	results   chan scheduler.ActionResult
 	closed    bool
+	err       error
 }
 
 type schedulerEntry struct {
@@ -48,6 +49,9 @@ func newMockScheduler() *mockScheduler {
 }
 
 func (m *mockScheduler) Submit(_ context.Context, taskID string, action *taskdsl.Action) error {
+	if m.err != nil {
+		return m.err
+	}
 	m.submitted = append(m.submitted, schedulerEntry{taskID: taskID, action: action})
 	return nil
 }
@@ -300,6 +304,28 @@ func TestEngineImpl_ProcessResults_NilScheduler_Returns(t *testing.T) {
 		// ok
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("ProcessResults did not return for nil scheduler")
+	}
+}
+
+func TestEngineImpl_SchedulerError_FallsBackToDirectExecutor(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &StubPlanner{}
+	sched := newMockScheduler()
+	sched.err = fmt.Errorf("no available workers")
+	exec := &mockExecutor{result: &runtimeclient.ExecutionResult{ExitCode: 0}}
+	engine := NewEngineImpl(repo, bus, planner, nil, exec, nil, sched)
+	ctx := context.Background()
+
+	task, err := engine.StartTask(ctx, "echo hello")
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if exec.called != 1 {
+		t.Fatalf("expected direct executor called once, got %d", exec.called)
+	}
+	if task.State != string(Succeeded) {
+		t.Fatalf("expected state succeeded, got %s", task.State)
 	}
 }
 

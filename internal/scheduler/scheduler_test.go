@@ -21,6 +21,7 @@ type fakePool struct {
 	err      error
 	selected string // next SelectWorker return
 	selErr   error
+	execute  func(ctx context.Context, workerID, taskID string, action *taskdsl.Action) (*runtimeclient.ExecutionResult, error)
 }
 
 type execCall struct {
@@ -33,7 +34,10 @@ func (p *fakePool) SelectWorker(_ context.Context) (string, error) {
 	return p.selected, p.selErr
 }
 
-func (p *fakePool) Execute(_ context.Context, workerID, taskID string, action *taskdsl.Action) (*runtimeclient.ExecutionResult, error) {
+func (p *fakePool) Execute(ctx context.Context, workerID, taskID string, action *taskdsl.Action) (*runtimeclient.ExecutionResult, error) {
+	if p.execute != nil {
+		return p.execute(ctx, workerID, taskID, action)
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.execLog = append(p.execLog, execCall{workerID: workerID, taskID: taskID, actionID: action.ID})
@@ -137,6 +141,38 @@ func TestLocalScheduler_MultipleSubmits(t *testing.T) {
 	log := pool.getExecLog()
 	if len(log) != 3 {
 		t.Fatalf("expected 3 executions, got %d", len(log))
+	}
+}
+
+func TestLocalScheduler_DetachesDispatchFromCallerCancellation(t *testing.T) {
+	release := make(chan struct{})
+	pool := &fakePool{selected: "w-1"}
+	pool.execute = func(ctx context.Context, workerID, taskID string, action *taskdsl.Action) (*runtimeclient.ExecutionResult, error) {
+		<-release
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return &runtimeclient.ExecutionResult{ExitCode: 0}, nil
+	}
+
+	sched := NewLocalScheduler(pool)
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := sched.Submit(ctx, "task-1", &taskdsl.Action{ID: "act-1", Kind: "command.exec"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	cancel()
+	close(release)
+
+	select {
+	case r := <-sched.Results():
+		if r.Error != nil {
+			t.Fatalf("expected detached context, got error: %v", r.Error)
+		}
+		if r.ExitCode != 0 {
+			t.Fatalf("expected exit code 0, got %d", r.ExitCode)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for result")
 	}
 }
 

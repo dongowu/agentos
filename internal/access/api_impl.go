@@ -19,6 +19,18 @@ func NewTaskSubmissionAPIImpl(engine orchestration.TaskEngine) *TaskSubmissionAP
 
 // CreateTask implements TaskSubmissionAPI.
 func (a *TaskSubmissionAPIImpl) CreateTask(ctx context.Context, req CreateTaskRequest) (*CreateTaskResponse, error) {
+	if rich, ok := a.engine.(orchestration.RichTaskEngine); ok {
+		task, err := rich.StartTaskWithInput(ctx, orchestration.StartTaskInput{
+			Prompt:    req.Prompt,
+			AgentName: req.AgentName,
+			TenantID:  req.TenantID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("start task: %w", err)
+		}
+		return &CreateTaskResponse{TaskID: task.ID, State: task.State}, nil
+	}
+
 	task, err := a.engine.StartTask(ctx, req.Prompt)
 	if err != nil {
 		return nil, fmt.Errorf("start task: %w", err)

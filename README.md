@@ -82,6 +82,10 @@ go run ./cmd/osctl submit "echo hello"
 # Output: task task-xxx created (state: succeeded)
 ```
 
+This direct-worker flow is the supported local path for `osctl` and `apiserver` when `AGENTOS_WORKER_ADDR` is set. In this mode, the control plane falls back to the configured worker address if no local scheduler worker is available.
+
+`controller` is still useful for worker registration and health monitoring, but it is a separate multi-process path from the direct local quick start above.
+
 With LLM planning:
 
 ```bash
@@ -92,6 +96,8 @@ export AGENTOS_MODE=dev \
        AGENTOS_LLM_MODEL=gpt-4o
 go run ./cmd/osctl submit "create a hello world python script"
 ```
+
+The HTTP gateway exposes `/agent/run`, `/agent/status`, `/agent/list`, and `/tool/run`.
 
 ## Agent DSL
 

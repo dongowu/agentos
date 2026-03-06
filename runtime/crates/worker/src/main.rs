@@ -7,34 +7,36 @@ use agentos_worker::registration::RegistrationClient;
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
+use tokio_stream::wrappers::TcpListenerStream;
 use tonic::transport::Server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = WorkerConfig::from_env();
 
-    let runtime = create_runtime(&config.runtime)
-        .map_err(|e| format!("failed to create runtime: {e}"))?;
+    let runtime =
+        create_runtime(&config.runtime).map_err(|e| format!("failed to create runtime: {e}"))?;
 
     let security = Arc::new(config.security);
     let executor = Arc::new(ActionExecutor::new(Arc::from(runtime), security));
 
     let addr: SocketAddr = config.listen_addr.parse()?;
     let svc = grpc::RuntimeServiceImpl::new(executor).into_server();
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let local_addr = listener.local_addr()?;
 
     eprintln!(
         "agentos-worker listening on {} (runtime={}, autonomy={:?}, worker_id={})",
-        addr,
+        local_addr,
         config.runtime.kind,
         SecurityPolicy::default().autonomy,
         config.worker_id,
     );
 
-    // If a control plane address is configured, register and start heartbeating.
     let _heartbeat_handle = if let Some(ref cp_addr) = config.control_plane_addr {
         let reg_client = Arc::new(RegistrationClient::new(
             config.worker_id.clone(),
-            config.listen_addr.clone(),
+            local_addr.to_string(),
             cp_addr.clone(),
             vec!["shell".into()],
             config.max_concurrent_tasks,
@@ -63,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Server::builder()
         .add_service(svc)
-        .serve(addr)
+        .serve_with_incoming(TcpListenerStream::new(listener))
         .await?;
 
     Ok(())

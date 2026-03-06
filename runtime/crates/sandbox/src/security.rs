@@ -62,10 +62,7 @@ impl Default for SecurityPolicy {
                 "chmod 777 *".into(),
                 ":(){ :|:& };:".into(),
             ],
-            forbidden_paths: vec![
-                PathBuf::from("/etc/shadow"),
-                PathBuf::from("/etc/passwd"),
-            ],
+            forbidden_paths: vec![PathBuf::from("/etc/shadow"), PathBuf::from("/etc/passwd")],
             max_actions_per_hour: 120,
             max_output_bytes: 1_048_576,
         }

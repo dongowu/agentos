@@ -76,7 +76,7 @@ func (h *Handler) ServeAgentRun(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "task api not configured")
 		return
 	}
-	resp, err := h.TaskAPI.CreateTask(r.Context(), access.CreateTaskRequest{Prompt: prompt})
+	resp, err := h.TaskAPI.CreateTask(r.Context(), access.CreateTaskRequest{Prompt: prompt, AgentName: agentName})
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return

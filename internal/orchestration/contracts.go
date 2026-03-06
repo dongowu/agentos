@@ -13,6 +13,13 @@ type PlanInput struct {
 	TenantID string
 }
 
+// StartTaskInput carries execution context from the transport layer into orchestration.
+type StartTaskInput struct {
+	Prompt    string
+	AgentName string
+	TenantID  string
+}
+
 // Planner converts a prompt into a structured plan.
 type Planner interface {
 	Plan(ctx context.Context, input PlanInput) (*taskdsl.Plan, error)
@@ -23,6 +30,13 @@ type TaskEngine interface {
 	StartTask(ctx context.Context, prompt string) (*taskdsl.Task, error)
 	Transition(ctx context.Context, taskID string, to TaskState) error
 	GetTask(ctx context.Context, taskID string) (*taskdsl.Task, error)
+}
+
+// RichTaskEngine is an optional extension implemented by engines that can accept
+// richer task-start context without breaking the original interface.
+type RichTaskEngine interface {
+	TaskEngine
+	StartTaskWithInput(ctx context.Context, input StartTaskInput) (*taskdsl.Task, error)
 }
 
 // SkillResolver maps an action to the runtime profile and skill contract it needs.

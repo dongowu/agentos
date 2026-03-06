@@ -4,8 +4,9 @@ import "context"
 
 // CreateTaskRequest is the canonical task submission payload shared by HTTP and CLI.
 type CreateTaskRequest struct {
-	Prompt   string `json:"prompt"`
-	TenantID string `json:"tenant_id,omitempty"`
+	Prompt    string `json:"prompt"`
+	TenantID  string `json:"tenant_id,omitempty"`
+	AgentName string `json:"agent_name,omitempty"`
 }
 
 // CreateTaskResponse is returned after a task is accepted by the control plane.

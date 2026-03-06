@@ -64,7 +64,10 @@ pub struct ExecutionResult {
 #[derive(Debug)]
 pub enum RuntimeError {
     /// The command exceeded its timeout.
-    Timeout { elapsed: Duration },
+    Timeout {
+        elapsed: Duration,
+        context: Option<&'static str>,
+    },
     /// The shell binary was not found on this platform.
     ShellNotFound(String),
     /// An I/O error during command execution.
@@ -78,8 +81,16 @@ pub enum RuntimeError {
 impl std::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RuntimeError::Timeout { elapsed } => {
-                write!(f, "command timed out after {:.1}s", elapsed.as_secs_f64())
+            RuntimeError::Timeout { elapsed, context } => {
+                if let Some(context) = context {
+                    write!(
+                        f,
+                        "{context} command timed out after {:.1}s",
+                        elapsed.as_secs_f64()
+                    )
+                } else {
+                    write!(f, "command timed out after {:.1}s", elapsed.as_secs_f64())
+                }
             }
             RuntimeError::ShellNotFound(msg) => write!(f, "shell not found: {msg}"),
             RuntimeError::IoError(e) => write!(f, "I/O error: {e}"),
@@ -101,6 +112,27 @@ impl std::error::Error for RuntimeError {
 impl From<std::io::Error> for RuntimeError {
     fn from(e: std::io::Error) -> Self {
         RuntimeError::IoError(e)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RuntimeError;
+    use std::time::Duration;
+
+    #[test]
+    fn timeout_display_includes_optional_context() {
+        let generic = RuntimeError::Timeout {
+            elapsed: Duration::from_millis(250),
+            context: None,
+        };
+        assert!(generic.to_string().contains("command timed out after 0.2s"));
+
+        let docker = RuntimeError::Timeout {
+            elapsed: Duration::from_secs(5),
+            context: Some("docker"),
+        };
+        assert_eq!(docker.to_string(), "docker command timed out after 5.0s");
     }
 }
 

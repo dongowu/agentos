@@ -26,6 +26,9 @@ type Pool struct {
 
 // NewPool creates a worker pool backed by the given registry and dialer.
 func NewPool(registry Registry, dialer Dialer) *Pool {
+	if dialer == nil {
+		dialer = NewGRPCDialer()
+	}
 	return &Pool{
 		registry: registry,
 		dialer:   dialer,
@@ -104,7 +107,6 @@ func (p *Pool) Close() error {
 
 // getOrDial returns a cached client or establishes a new connection.
 func (p *Pool) getOrDial(ctx context.Context, workerID string) (runtimeclient.ExecutorClient, error) {
-	// Fast path: check cache with read lock.
 	p.mu.RLock()
 	client, exists := p.clients[workerID]
 	p.mu.RUnlock()
@@ -112,7 +114,6 @@ func (p *Pool) getOrDial(ctx context.Context, workerID string) (runtimeclient.Ex
 		return client, nil
 	}
 
-	// Look up address from registry.
 	workers, err := p.registry.List(ctx)
 	if err != nil {
 		return nil, err
@@ -128,10 +129,6 @@ func (p *Pool) getOrDial(ctx context.Context, workerID string) (runtimeclient.Ex
 		return nil, errors.New("worker not found: " + workerID)
 	}
 
-	if p.dialer == nil {
-		return nil, errors.New("no dialer configured")
-	}
-
 	c, err := p.dialer.Dial(ctx, addr)
 	if err != nil {
 		return nil, err
@@ -140,7 +137,6 @@ func (p *Pool) getOrDial(ctx context.Context, workerID string) (runtimeclient.Ex
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Double-check in case another goroutine dialed concurrently.
 	if existing, ok := p.clients[workerID]; ok {
 		if closer, ok := c.(interface{ Close() error }); ok {
 			_ = closer.Close()

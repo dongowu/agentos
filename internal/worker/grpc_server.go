@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"log"
+	"sort"
 
 	pb "github.com/dongowu/agentos/api/gen/agentos/v1"
 )
@@ -56,4 +57,38 @@ func (s *RegistryServer) Deregister(ctx context.Context, req *pb.DeregisterReque
 
 	log.Printf("[grpc] deregistered worker=%s", req.GetWorkerId())
 	return &pb.DeregisterResponse{Ok: true}, nil
+}
+
+// ListWorkers returns the current worker snapshots for remote schedulers.
+func (s *RegistryServer) ListWorkers(ctx context.Context, req *pb.ListWorkersRequest) (*pb.ListWorkersResponse, error) {
+	var (
+		workers []WorkerInfo
+		err     error
+	)
+	if req.GetAvailableOnly() {
+		workers, err = s.registry.GetAvailable(ctx)
+	} else {
+		workers, err = s.registry.List(ctx)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Slice(workers, func(i, j int) bool {
+		return workers[i].ID < workers[j].ID
+	})
+
+	resp := &pb.ListWorkersResponse{Workers: make([]*pb.WorkerSnapshot, 0, len(workers))}
+	for _, info := range workers {
+		resp.Workers = append(resp.Workers, &pb.WorkerSnapshot{
+			WorkerId:          info.ID,
+			Addr:              info.Addr,
+			Capabilities:      append([]string(nil), info.Capabilities...),
+			Status:            string(info.Status),
+			ActiveTasks:       int32(info.ActiveTasks),
+			MaxTasks:          int32(info.MaxTasks),
+			LastHeartbeatUnix: info.LastHeartbeat.Unix(),
+		})
+	}
+	return resp, nil
 }

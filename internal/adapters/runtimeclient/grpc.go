@@ -12,6 +12,22 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+func normalizeActionPayload(payload map[string]any) map[string]any {
+	if payload == nil {
+		return nil
+	}
+	normalized := make(map[string]any, len(payload)+1)
+	for key, value := range payload {
+		normalized[key] = value
+	}
+	if _, hasCommand := normalized["command"]; !hasCommand {
+		if cmd, hasCmd := normalized["cmd"]; hasCmd {
+			normalized["command"] = cmd
+		}
+	}
+	return normalized
+}
+
 // GRPCExecutorClient implements runtimeclient.ExecutorClient via gRPC.
 type GRPCExecutorClient struct {
 	addr   string
@@ -34,7 +50,7 @@ func NewGRPCExecutorClient(ctx context.Context, addr string) (*GRPCExecutorClien
 
 // ExecuteAction implements runtimeclient.ExecutorClient.
 func (c *GRPCExecutorClient) ExecuteAction(ctx context.Context, taskID string, action *taskdsl.Action) (*runtimeclient.ExecutionResult, error) {
-	payload, _ := json.Marshal(action.Payload)
+	payload, _ := json.Marshal(normalizeActionPayload(action.Payload))
 	req := &v1.ExecuteActionRequest{
 		TaskId:         taskID,
 		ActionId:       action.ID,

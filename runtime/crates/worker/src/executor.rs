@@ -61,9 +61,7 @@ impl ActionExecutor {
 
         // 2. Enforce policy output limit if spec's is larger
         let spec = ExecutionSpec {
-            max_output_bytes: spec
-                .max_output_bytes
-                .min(self.security.max_output_bytes),
+            max_output_bytes: spec.max_output_bytes.min(self.security.max_output_bytes),
             ..spec
         };
 

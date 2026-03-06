@@ -82,6 +82,10 @@ go run ./cmd/osctl submit "echo hello"
 # 输出: task task-xxx created (state: succeeded)
 ```
 
+当设置 `AGENTOS_WORKER_ADDR` 时，上面的直连 Worker 流程是 `osctl` 和 `apiserver` 当前支持的本地运行方式。此时如果本地调度器没有可用 worker，控制面会回退到该直连 worker 地址执行。
+
+`controller` 仍然用于 worker 注册和健康监测，但它属于另一条多进程运行路径，不是上面这个本地快速开始的必需项。
+
 接入真实 LLM：
 
 ```bash
@@ -92,6 +96,8 @@ export AGENTOS_MODE=dev \
        AGENTOS_LLM_MODEL=gpt-4o
 go run ./cmd/osctl submit "创建一个 hello world Python 脚本"
 ```
+
+HTTP 网关当前暴露 `/agent/run`、`/agent/status`、`/agent/list` 和 `/tool/run`。
 
 ## Agent DSL
 
