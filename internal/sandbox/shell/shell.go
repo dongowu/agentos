@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"bytes"
 	"context"
 	"os/exec"
 	"runtime"
@@ -28,19 +29,23 @@ func (Shell) Run(ctx context.Context, spec sandbox.Spec) (sandbox.Result, error)
 		c = exec.CommandContext(ctx, "sh", "-c", spec.Command)
 	}
 
-	out, err := c.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	c.Stdout = &stdout
+	c.Stderr = &stderr
+
+	err := c.Run()
 	res := sandbox.Result{
-		Stdout:   out,
-		Stderr:   nil,
+		Stdout:   stdout.Bytes(),
+		Stderr:   stderr.Bytes(),
 		ExitCode: 0,
 	}
 	if err != nil {
-		res.Stderr = out
-		res.Stdout = nil
 		if ee, ok := err.(*exec.ExitError); ok {
 			res.ExitCode = ee.ExitCode()
+			return res, nil
 		} else {
 			res.ExitCode = -1
+			return res, err
 		}
 	}
 	return res, nil

@@ -1,11 +1,10 @@
 package builtin
 
 import (
-	"bytes"
 	"context"
-	"os/exec"
-	"runtime"
 
+	"github.com/dongowu/agentos/internal/sandbox"
+	shellsandbox "github.com/dongowu/agentos/internal/sandbox/shell"
 	"github.com/dongowu/agentos/internal/tool"
 )
 
@@ -14,12 +13,18 @@ func init() {
 }
 
 // ShellTool executes shell commands.
-type ShellTool struct{}
+type ShellTool struct {
+	Runner shellRunner
+}
+
+type shellRunner interface {
+	Run(ctx context.Context, spec sandbox.Spec) (sandbox.Result, error)
+}
 
 func (ShellTool) Name() string        { return "shell" }
 func (ShellTool) Description() string { return "Execute shell commands" }
 
-func (ShellTool) Run(ctx context.Context, input map[string]any) (any, error) {
+func (s ShellTool) Run(ctx context.Context, input map[string]any) (any, error) {
 	cmdVal, ok := input["cmd"]
 	if !ok {
 		return nil, ErrMissingInput{Field: "cmd"}
@@ -29,34 +34,20 @@ func (ShellTool) Run(ctx context.Context, input map[string]any) (any, error) {
 		return nil, ErrInvalidInput{Field: "cmd", Want: "string"}
 	}
 
-	var c *exec.Cmd
-	switch runtime.GOOS {
-	case "windows":
-		c = exec.CommandContext(ctx, "cmd", "/c", cmdStr)
-	default:
-		c = exec.CommandContext(ctx, "sh", "-c", cmdStr)
+	runner := s.Runner
+	if runner == nil {
+		runner = shellsandbox.Shell{}
 	}
 
-	var stdout, stderr bytes.Buffer
-	c.Stdout = &stdout
-	c.Stderr = &stderr
-
-	err := c.Run()
+	result, err := runner.Run(ctx, sandbox.Spec{Type: "shell", Command: cmdStr})
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return map[string]any{
-				"stdout":    stdout.String(),
-				"stderr":    stderr.String(),
-				"exit_code": ee.ExitCode(),
-			}, nil
-		}
 		return nil, err
 	}
 
 	return map[string]any{
-		"stdout":    stdout.String(),
-		"stderr":    stderr.String(),
-		"exit_code": 0,
+		"stdout":    string(result.Stdout),
+		"stderr":    string(result.Stderr),
+		"exit_code": result.ExitCode,
 	}, nil
 }
 
