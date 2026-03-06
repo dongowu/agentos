@@ -1,41 +1,43 @@
 # AgentOS Architecture Overview
 
-AgentOS separates control logic from execution logic and uses a pluggable adapter architecture for messaging and persistence.
+**AgentOS = Kubernetes for AI Agents**
 
-## Layers
+Agent Infrastructure：LLM 不再直接调用工具，而是运行在 AgentOS 上。
 
-### 1. Access Layer
+**完整架构**: 参见 [AgentOS v1 Architecture](agentos-v1-architecture.md)。
 
-Go services that expose HTTP, WebSocket, and CLI entry points.
+## 6 大核心系统（概要）
 
-### 2. Orchestration Layer
+| 系统 | 职责 |
+|------|------|
+| Access System | API、CLI、UI、SDK、Auth |
+| Agent Brain | Planner、Reasoner，自然语言 → Plan |
+| Task Engine | 状态机、重试、队列 |
+| Skill System | Skill Registry、Skill Resolver |
+| Policy Engine | 权限、Guardrail、OPA/Cedar |
+| Runtime System | Rust Worker、Sandbox、Telemetry |
 
-Go services that generate plans, resolve skills, and drive the task state machine.
+## 数据流
 
-### 3. Messaging and Persistence Layer
+```
+Clients → Access → Agent Brain → Task Engine → Skill System → Policy → Runtime Broker → Rust Worker
+```
 
-Event delivery and state storage are pluggable:
+## 当前实现状态
 
-- **EventBus**: `memory` (dev) or `nats` (default, JetStream)
-- **TaskRepository**: `memory` (dev) or `postgres` (default)
+- **Access**: HTTP、CLI 已实现
+- **Agent Brain + Task Engine**: Planner、TaskEngine、SkillResolver 已实现
+- **Policy Engine**: 设计完成，待实现
+- **Skill System**: stub 实现，完整设计见 [skill-system.md](skill-system.md)
+- **Runtime Broker**: 当前直连 Worker，未来可扩展调度
+- **Messaging & Persistence**: memory、nats、postgres 适配器已实现
+- **Runtime**: Rust Worker gRPC 已实现
 
-Adapters live in `internal/adapters/`. `internal/bootstrap` wires them from `pkg/config`.
+## 设计原则
 
-### 4. Execution Layer
+控制面依赖契约，不依赖具体实现：
 
-Rust workers manage sandbox startup, command execution, telemetry capture, and runtime isolation.
-
-### 5. Infrastructure Layer
-
-Registry, compute nodes, deployment manifests, and networking primitives that host the platform.
-
-## Design Rule
-
-The control plane should depend on contracts, not concrete runtime implementations.
-
-That means:
-
-- Go code depends on `Planner`, `TaskRepository`, `EventBus`, and `ExecutorClient` interfaces.
-- Rust code depends on `IsolationProvider` and telemetry traits.
-- Cross-language communication depends only on versioned protobuf contracts.
-- Messaging and persistence implementations are swappable via config; defaults are NATS + PostgreSQL.
+- Go 依赖 `Planner`、`TaskRepository`、`EventBus`、`ExecutorClient` 等接口
+- Rust 依赖 `IsolationProvider` 等 trait
+- 跨语言通信仅依赖 versioned protobuf
+- Messaging 和 Persistence 通过 config 可切换；默认 NATS + PostgreSQL

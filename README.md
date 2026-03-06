@@ -6,27 +6,23 @@ The design goal is simple: keep planning, orchestration, and persistence in Go; 
 
 ## Architecture
 
-AgentOS is organized as five layers:
+**AgentOS = Kubernetes for AI Agents**
 
-1. `Access Layer`
-   - Receives user input through HTTP API, WebSocket, and CLI.
-   - Handles auth, request validation, and streaming responses.
-2. `Orchestration Layer`
-   - Turns natural language into structured plans.
-   - Resolves skills, drives the task state machine, and decides next actions.
-3. `Messaging & Persistence Layer`
-   - Stores the system source of truth in PostgreSQL.
-   - Uses NATS JetStream for dispatch, streaming, and worker feedback.
-4. `Execution Layer`
-   - Starts isolated runtime environments.
-   - Executes commands and tool actions inside sandboxed workers.
-5. `Infrastructure Layer`
-   - Provides container images, compute nodes, and deployment primitives.
+Agent Infrastructure：LLM 不再直接调用工具，而是运行在 AgentOS 上。
+
+6 大核心系统：Access → Agent Brain → Task Engine → Skill System → Policy Engine → Runtime.
+
+详见 [AgentOS v1 Architecture](docs/architecture/agentos-v1-architecture.md)。
 
 ## Documentation
 
+- [ClawOS v1 架构](docs/architecture/clawos-v1-architecture.md) - 一步到位，可直接开干
+- [AgentOS v1 Architecture](docs/architecture/agentos-v1-architecture.md) - 完整架构定型
+- [Monorepo 最终版结构](docs/architecture/monorepo-structure.md) - 10 万行可扩展目录
 - [Architecture Overview](docs/architecture/overview.md)
 - [Pluggable Adapters](docs/architecture/adapters.md)
+- [Skill System](docs/architecture/skill-system.md)
+- [Policy Engine](docs/architecture/policy-engine.md)
 - [MVP Scope](docs/architecture/mvp-scope.md)
 - [Bootstrap Plan](docs/plans/2026-03-06-agentos-bootstrap-plan.md)
 
