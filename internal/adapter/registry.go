@@ -6,9 +6,9 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/agentos/agentos/internal/messaging"
-	"github.com/agentos/agentos/internal/persistence"
-	"github.com/agentos/agentos/pkg/config"
+	"github.com/dongowu/ai-orchestrator/internal/messaging"
+	"github.com/dongowu/ai-orchestrator/internal/persistence"
+	"github.com/dongowu/ai-orchestrator/pkg/config"
 )
 
 // EventBusFactory creates an EventBus from messaging config.

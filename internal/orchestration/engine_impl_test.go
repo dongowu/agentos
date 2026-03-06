@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	msgmemory "github.com/agentos/agentos/internal/adapters/messaging/memory"
-	persmemory "github.com/agentos/agentos/internal/adapters/persistence/memory"
+	msgmemory "github.com/dongowu/ai-orchestrator/internal/adapters/messaging/memory"
+	persmemory "github.com/dongowu/ai-orchestrator/internal/adapters/persistence/memory"
 )
 
 func TestEngineImpl_StartTask_RunsPlanningAndTransitionsToQueued(t *testing.T) {

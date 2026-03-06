@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/agentos/agentos/internal/bootstrap"
+	"github.com/dongowu/ai-orchestrator/internal/bootstrap"
 )
 
 func main() {

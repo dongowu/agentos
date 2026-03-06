@@ -1,6 +1,6 @@
 package orchestration
 
-import "github.com/agentos/agentos/pkg/taskdsl"
+import "github.com/dongowu/ai-orchestrator/pkg/taskdsl"
 
 // StubSkillResolver returns the action's RuntimeEnv as the profile.
 type StubSkillResolver struct{}

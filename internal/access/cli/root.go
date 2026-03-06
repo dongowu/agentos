@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/agentos/agentos/internal/access"
+	"github.com/dongowu/ai-orchestrator/internal/access"
 	"github.com/spf13/cobra"
 )
 

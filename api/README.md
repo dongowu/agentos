@@ -13,8 +13,8 @@ Protobuf contracts shared between Go control plane and Rust runtime.
 ```bash
 # Go (requires protoc, protoc-gen-go, protoc-gen-go-grpc)
 make proto-gen
-# or: protoc -I api/proto --go_out=api/gen --go_opt=module=github.com/agentos/agentos \
-#        --go-grpc_out=api/gen --go-grpc_opt=module=github.com/agentos/agentos \
+# or: protoc -I api/proto --go_out=api/gen --go_opt=module=github.com/dongowu/ai-orchestrator \
+#        --go-grpc_out=api/gen --go-grpc_opt=module=github.com/dongowu/ai-orchestrator \
 #        api/proto/agentos/v1/runtime.proto
 
 # Rust (in runtime/)

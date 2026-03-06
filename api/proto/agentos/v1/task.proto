@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package agentos.v1;
 
-option go_package = "github.com/agentos/agentos/api/gen/agentos/v1;v1";
+option go_package = "github.com/dongowu/ai-orchestrator/api/gen/agentos/v1;v1";
 
 message Task {
   string id = 1;

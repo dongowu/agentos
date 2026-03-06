@@ -3,8 +3,8 @@
 package defaults
 
 import (
-	_ "github.com/agentos/agentos/internal/adapters/messaging/memory"
-	_ "github.com/agentos/agentos/internal/adapters/messaging/nats"
-	_ "github.com/agentos/agentos/internal/adapters/persistence/memory"
-	_ "github.com/agentos/agentos/internal/adapters/persistence/postgres"
+	_ "github.com/dongowu/ai-orchestrator/internal/adapters/messaging/memory"
+	_ "github.com/dongowu/ai-orchestrator/internal/adapters/messaging/nats"
+	_ "github.com/dongowu/ai-orchestrator/internal/adapters/persistence/memory"
+	_ "github.com/dongowu/ai-orchestrator/internal/adapters/persistence/postgres"
 )
