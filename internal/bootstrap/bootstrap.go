@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/dongowu/agentos/internal/adapter"
+	"github.com/dongowu/agentos/internal/adapters/llm"
 	"github.com/dongowu/agentos/internal/adapters/llm/openai"
+	adapternats "github.com/dongowu/agentos/internal/adapters/messaging/nats"
 	adapterruntime "github.com/dongowu/agentos/internal/adapters/runtimeclient"
 	"github.com/dongowu/agentos/internal/agent"
 	"github.com/dongowu/agentos/internal/memory"
@@ -43,20 +45,62 @@ type App struct {
 	closers        []io.Closer
 }
 
-func plannerFromConfig(cfg config.Config) orchestration.Planner {
-	if cfg.LLM.Provider == "openai" && cfg.LLM.APIKey != "" {
-		baseURL := cfg.LLM.BaseURL
-		if baseURL == "" {
-			baseURL = "https://api.openai.com"
-		}
-		model := cfg.LLM.Model
-		if model == "" {
-			model = "gpt-4o"
-		}
-		llmClient := openai.NewClient(baseURL, cfg.LLM.APIKey)
-		return orchestration.NewLLMPlanner(llmClient, model)
+type closeFunc func() error
+
+func (f closeFunc) Close() error { return f() }
+
+func llmProviderFromConfig(cfg config.Config) (llm.Provider, string) {
+	if cfg.LLM.Provider != "openai" || cfg.LLM.APIKey == "" {
+		return nil, ""
 	}
-	return &orchestration.PromptPlanner{}
+	baseURL := cfg.LLM.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.openai.com"
+	}
+	model := cfg.LLM.Model
+	if model == "" {
+		model = "gpt-4o"
+	}
+	return openai.NewClient(baseURL, cfg.LLM.APIKey), model
+}
+
+func plannerFromConfig(cfg config.Config) orchestration.Planner {
+	promptPlanner := &orchestration.PromptPlanner{}
+	provider, model := llmProviderFromConfig(cfg)
+	if provider == nil {
+		return promptPlanner
+	}
+	llmPlanner := orchestration.NewRetryPlanner(orchestration.NewLLMPlanner(provider, model), 2)
+	return orchestration.NewFallbackPlanner(llmPlanner, promptPlanner)
+}
+
+func schedulerFromConfig(ctx context.Context, cfg config.Config, pool scheduler.WorkerPool, startDispatcher bool) (scheduler.Scheduler, []io.Closer, error) {
+	switch cfg.Scheduler.Mode {
+	case "", "local":
+		sched := scheduler.NewLocalScheduler(pool)
+		return sched, []io.Closer{sched}, nil
+	case "nats":
+		nc, js, stream, err := adapternats.OpenJetStream(cfg.Messaging.NATS.URL, cfg.Messaging.NATS.Stream)
+		if err != nil {
+			return nil, nil, fmt.Errorf("open jetstream: %w", err)
+		}
+		sched := scheduler.NewNATSSchedulerFromJetStream(js, stream)
+		closers := []io.Closer{closeFunc(func() error {
+			nc.Close()
+			return nil
+		}), sched}
+		if startDispatcher {
+			dispatcher := scheduler.NewNATSDispatcherFromJetStream(js, stream, pool)
+			if err := dispatcher.Start(ctx); err != nil {
+				nc.Close()
+				return nil, nil, fmt.Errorf("start dispatcher: %w", err)
+			}
+			closers = append(closers, dispatcher)
+		}
+		return sched, closers, nil
+	default:
+		return nil, nil, fmt.Errorf("unknown scheduler mode %q", cfg.Scheduler.Mode)
+	}
 }
 
 // New builds an App from config.
@@ -123,8 +167,12 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	workerPool := worker.NewPool(workerReg, worker.NewGRPCDialer())
 	closers = append(closers, workerPool)
 
-	sched := scheduler.NewLocalScheduler(workerPool)
-	closers = append(closers, sched)
+	startDispatcher := cfg.Scheduler.Mode == "nats" && cfg.Scheduler.ControlPlaneAddr == ""
+	sched, schedClosers, err := schedulerFromConfig(ctx, cfg, workerPool, startDispatcher)
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: %w", err)
+	}
+	closers = append(closers, schedClosers...)
 
 	var executor runtimeclient.ExecutorClient
 	if addr := cfg.Runtime.WorkerAddr; addr != "" {

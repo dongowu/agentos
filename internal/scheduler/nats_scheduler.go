@@ -10,12 +10,28 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-const (
-	subjectDispatch = "AGENTOS.actions.dispatch"
-	subjectResult   = "AGENTOS.actions.result" // .{taskID}.{actionID}
-)
+type subscription interface {
+	Unsubscribe() error
+}
+
+type jetStreamClient interface {
+	Publish(subject string, data []byte, opts ...nats.PubOpt) (*nats.PubAck, error)
+	Subscribe(subject string, cb nats.MsgHandler, opts ...nats.SubOpt) (subscription, error)
+}
 
 // actionRequest is the message published to NATS for worker consumption.
+type jetStreamWrapper struct {
+	inner nats.JetStreamContext
+}
+
+func (w jetStreamWrapper) Publish(subject string, data []byte, opts ...nats.PubOpt) (*nats.PubAck, error) {
+	return w.inner.Publish(subject, data, opts...)
+}
+
+func (w jetStreamWrapper) Subscribe(subject string, cb nats.MsgHandler, opts ...nats.SubOpt) (subscription, error) {
+	return w.inner.Subscribe(subject, cb, opts...)
+}
+
 type actionRequest struct {
 	TaskID   string         `json:"task_id"`
 	ActionID string         `json:"action_id"`
@@ -35,25 +51,40 @@ type actionResponse struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// NATSScheduler dispatches actions via NATS queue groups so workers
-// compete for tasks (competitive consumer pattern).
-type NATSScheduler struct {
-	js      nats.JetStreamContext
-	results chan ActionResult
-	mu      sync.Mutex
-	subs    []*nats.Subscription
+func dispatchSubject(stream string) string {
+	return normalizeStream(stream) + ".actions.dispatch"
 }
 
-// NewNATSScheduler creates a scheduler using the given NATS JetStream context.
-func NewNATSScheduler(js nats.JetStreamContext) *NATSScheduler {
+func resultSubject(stream, taskID, actionID string) string {
+	return fmt.Sprintf("%s.actions.result.%s.%s", normalizeStream(stream), taskID, actionID)
+}
+
+func normalizeStream(stream string) string {
+	if stream == "" {
+		return "AGENTOS"
+	}
+	return stream
+}
+
+// NATSScheduler dispatches actions via NATS so another process can consume and execute them.
+type NATSScheduler struct {
+	js      jetStreamClient
+	stream  string
+	results chan ActionResult
+	mu      sync.Mutex
+	subs    []subscription
+}
+
+// NewNATSScheduler creates a scheduler using the given JetStream client and subject prefix.
+func NewNATSScheduler(js jetStreamClient, stream string) *NATSScheduler {
 	return &NATSScheduler{
 		js:      js,
+		stream:  normalizeStream(stream),
 		results: make(chan ActionResult, 64),
 	}
 }
 
 // Submit publishes an action request to the dispatch subject.
-// Workers subscribe to this subject via a queue group and compete to consume it.
 func (s *NATSScheduler) Submit(_ context.Context, taskID string, action *taskdsl.Action) error {
 	req := actionRequest{
 		TaskID:   taskID,
@@ -67,13 +98,12 @@ func (s *NATSScheduler) Submit(_ context.Context, taskID string, action *taskdsl
 		return fmt.Errorf("marshal action request: %w", err)
 	}
 
-	// Subscribe to the result subject for this task+action if not already listening.
-	resultSubject := fmt.Sprintf("%s.%s.%s", subjectResult, taskID, action.ID)
-	if err := s.subscribeResult(resultSubject); err != nil {
+	subject := resultSubject(s.stream, taskID, action.ID)
+	if err := s.subscribeResult(subject); err != nil {
 		return fmt.Errorf("subscribe result: %w", err)
 	}
 
-	if _, err := s.js.Publish(subjectDispatch, data); err != nil {
+	if _, err := s.js.Publish(dispatchSubject(s.stream), data); err != nil {
 		return fmt.Errorf("publish action: %w", err)
 	}
 	return nil
@@ -125,3 +155,8 @@ func (s *NATSScheduler) Close() error {
 }
 
 var _ Scheduler = (*NATSScheduler)(nil)
+
+// NewNATSSchedulerFromJetStream adapts a real JetStream context into the scheduler interface.
+func NewNATSSchedulerFromJetStream(js nats.JetStreamContext, stream string) *NATSScheduler {
+	return NewNATSScheduler(jetStreamWrapper{inner: js}, stream)
+}

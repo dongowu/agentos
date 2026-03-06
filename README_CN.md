@@ -97,7 +97,13 @@ export AGENTOS_MODE=dev \
 go run ./cmd/osctl submit "创建一个 hello world Python 脚本"
 ```
 
-HTTP 网关当前暴露 `/agent/run`、`/agent/status`、`/agent/list` 和 `/tool/run`。
+HTTP 网关当前暴露 `/health`、`/agent/run`、`/agent/status`、`/agent/list`、`/tool/run`，以及用于任务遥测的 `GET /v1/tasks/{task_id}/stream` SSE 接口。
+
+如果要跑真实三进程验收（`controller + apiserver + worker`），可直接执行：
+
+```bash
+./scripts/acceptance.sh
+```
 
 ## Agent DSL
 
@@ -149,7 +155,7 @@ agentos/
 │   ├── proto/agentos/v1/          # Protobuf 契约 (Go <-> Rust)
 │   └── gen/                       # 生成的 Go gRPC 代码
 ├── cmd/
-│   ├── apiserver/                 # HTTP + WebSocket API 服务
+│   ├── apiserver/                 # HTTP + SSE API 服务
 │   ├── controller/                # 编排循环
 │   ├── claw-cli/                  # ClawOS CLI
 │   └── osctl/                     # 开发者 CLI
@@ -189,17 +195,17 @@ agentos/
 
 | 接口 | 适配器 | 默认值 |
 |------|--------|--------|
-| `EventBus` | memory, nats | nats |
-| `TaskRepository` | memory, postgres | postgres |
-| `Planner` | stub, openai (LLM) | stub |
+| `EventBus` | memory, nats | nats（生产）/ memory（开发） |
+| `TaskRepository` | memory, postgres | postgres（生产）/ memory（开发） |
+| `Planner` | prompt, openai (LLM) | 默认 prompt 回退；配置 LLM 后启用 OpenAI + retry/fallback 流水线 |
 | `Memory.Provider` | inmemory, redis | inmemory |
 | `RuntimeAdapter` (Rust) | native, docker | native |
-| `Scheduler` | local, nats | local |
+| `Scheduler` | local, nats | nats（生产）/ local（开发） |
 
 ```go
 app, err := bootstrap.FromEnv(ctx)
-// AGENTOS_MODE=dev  -> 内存适配器 + stub planner
-// AGENTOS_MODE=prod -> nats + postgres + openai
+// AGENTOS_MODE=dev  -> 内存适配器 + 本地调度器 + prompt planner
+// AGENTOS_MODE=prod -> nats + postgres + nats 调度 + 配置 API key 时启用 OpenAI planner
 ```
 
 ## 安全模型
@@ -247,23 +253,27 @@ app, err := bootstrap.FromEnv(ctx)
 
 - Worker 启动时向控制面注册
 - 周期性心跳（默认 10s），离线检测（30s 超时）
-- 任务通过 NATS Queue Group 分发（竞争消费模式）
-- 最少负载 Worker 优先选择
-- Worker 池懒加载 gRPC 连接缓存
+- 生产调度路径使用 NATS dispatch/result subject，并由 dispatcher bridge 执行
+- 开发模式仍可通过 `AGENTOS_WORKER_ADDR` 直连 worker
+- Worker 池结合最少负载选择与懒加载 gRPC 连接缓存
 
 ## 环境变量
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `AGENTOS_MODE` | dev（内存）或 prod（nats+postgres） | prod |
-| `AGENTOS_WORKER_ADDR` | Rust Worker gRPC 地址 | localhost:50051 |
-| `AGENTOS_LLM_API_KEY` | LLM API 密钥（启用真实规划） | — |
+| `AGENTOS_MODE` | dev（内存 + local 调度）或 prod（nats + postgres） | prod |
+| `AGENTOS_WORKER_ADDR` | 开发/直连执行时使用的 Rust Worker gRPC 地址 | localhost:50051 |
+| `AGENTOS_CONTROL_PLANE_ADDR` | 共享 controller 注册中心地址，用于远程 worker 发现 | — |
+| `AGENTOS_SCHEDULER_MODE` | `local` 或 `nats` | 生产：`nats`，开发：`local` |
+| `AGENTOS_API_LISTEN_ADDR` | API 服务监听地址 | :8080 |
+| `AGENTOS_LLM_API_KEY` | LLM API 密钥（启用 OpenAI planner 流水线） | — |
 | `AGENTOS_LLM_BASE_URL` | LLM API 基础 URL | https://api.openai.com |
 | `AGENTOS_LLM_MODEL` | LLM 模型名 | gpt-4o |
 | `AGENTOS_RUNTIME` | Worker 运行时：native 或 docker | native |
 | `AGENTOS_SECURITY_LEVEL` | supervised / semi / autonomous | supervised |
 | `AGENTOS_DOCKER_IMAGE` | Docker 沙箱镜像 | ubuntu:22.04 |
 | `AGENTOS_MAX_CONCURRENT_TASKS` | Worker 并发上限 | 4 |
+| `AGENTOS_AGENT_SECRETS` | Agent 密钥映射（`agent=secret,agent2=secret2`），用于注入不透明 token | — |
 
 ## 测试
 
@@ -280,7 +290,7 @@ cd runtime && cargo test --workspace
 | 阶段 | 重点 | 状态 |
 |------|------|------|
 | Stage 1: MVP | 核心链路（提交 → 规划 → 执行 → 结果） | 已完成 |
-| Stage 2: 智能体系 | LLM Planner、Agent YAML DSL、工具、记忆 | 已完成 |
+| Stage 2: 智能体系 | LLM planner 流水线、Agent YAML DSL、工具、记忆 | 已完成 |
 | Stage 3: 沙箱与安全 | Docker 隔离、SecurityPolicy、PolicyEngine | 已完成 |
 | Stage 4: 分布式调度 | Worker 注册、NATS 调度、Worker 池 | 已完成 |
 | Stage 5: 商业化平台 | Web UI (Claw Studio)、SDK、Agent 市场 | 规划中 |

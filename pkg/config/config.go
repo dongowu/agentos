@@ -110,7 +110,7 @@ func Default() Config {
 		Memory:    MemoryConfig{Provider: "inmemory", TTL: "24h"},
 		AgentDir:  "agents",
 		Policy:    PolicyConfig{DefaultAutonomy: "supervised"},
-		Scheduler: SchedulerConfig{Mode: "local", HeartbeatTimeout: "30s", HealthCheckInterval: "10s"},
+		Scheduler: SchedulerConfig{Mode: "nats", HeartbeatTimeout: "30s", HealthCheckInterval: "10s"},
 		Vault:     VaultConfig{AgentSecrets: map[string]string{}},
 	}
 }
@@ -150,6 +150,9 @@ func ApplyEnvOverrides(cfg Config) Config {
 	}
 	if controlPlane := os.Getenv("AGENTOS_CONTROL_PLANE_ADDR"); controlPlane != "" {
 		cfg.Scheduler.ControlPlaneAddr = controlPlane
+	}
+	if mode := os.Getenv("AGENTOS_SCHEDULER_MODE"); mode != "" {
+		cfg.Scheduler.Mode = mode
 	}
 	if provider := os.Getenv("AGENTOS_LLM_PROVIDER"); provider != "" {
 		cfg.LLM.Provider = provider

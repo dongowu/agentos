@@ -36,16 +36,27 @@ func splitPromptSegments(prompt string) []string {
 	if normalized == "" {
 		return nil
 	}
-	replacer := strings.NewReplacer(" and then ", " then ", " AND THEN ", " then ")
-	normalized = replacer.Replace(normalized)
-	parts := strings.Split(normalized, " then ")
-	segments := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
+	for _, replacement := range []struct{ old, new string }{
+		{"\r\n", "\n"},
+		{"\r", "\n"},
+		{" and then ", " then "},
+		{" AND THEN ", " then "},
+		{" after that ", " then "},
+		{" next ", " then "},
+		{";", "\n"},
+	} {
+		normalized = strings.ReplaceAll(normalized, replacement.old, replacement.new)
+	}
+	lines := strings.Split(normalized, "\n")
+	segments := make([]string, 0, len(lines))
+	for _, line := range lines {
+		for _, part := range strings.Split(line, " then ") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			segments = append(segments, part)
 		}
-		segments = append(segments, part)
 	}
 	if len(segments) == 0 {
 		return []string{normalized}

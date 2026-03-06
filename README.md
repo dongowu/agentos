@@ -97,7 +97,13 @@ export AGENTOS_MODE=dev \
 go run ./cmd/osctl submit "create a hello world python script"
 ```
 
-The HTTP gateway exposes `/agent/run`, `/agent/status`, `/agent/list`, and `/tool/run`.
+The HTTP gateway exposes `/health`, `/agent/run`, `/agent/status`, `/agent/list`, `/tool/run`, and `GET /v1/tasks/{task_id}/stream` for SSE task telemetry.
+
+For a real three-process acceptance run (`controller + apiserver + worker`), use:
+
+```bash
+./scripts/acceptance.sh
+```
 
 ## Agent DSL
 
@@ -147,7 +153,7 @@ agentos/
 │   ├── proto/agentos/v1/          # Protobuf contracts (Go <-> Rust)
 │   └── gen/                       # Generated Go gRPC code
 ├── cmd/
-│   ├── apiserver/                 # HTTP + WebSocket API server
+│   ├── apiserver/                 # HTTP + SSE API server
 │   ├── controller/                # Orchestration loop
 │   ├── claw-cli/                  # ClawOS CLI
 │   └── osctl/                     # Developer CLI
@@ -187,17 +193,17 @@ agentos/
 
 | Interface | Adapters | Default |
 |-----------|----------|---------|
-| `EventBus` | memory, nats | nats |
-| `TaskRepository` | memory, postgres | postgres |
-| `Planner` | stub, openai (LLM) | stub |
+| `EventBus` | memory, nats | nats (prod) / memory (dev) |
+| `TaskRepository` | memory, postgres | postgres (prod) / memory (dev) |
+| `Planner` | prompt, openai (LLM) | prompt fallback; OpenAI + retry/fallback when configured |
 | `Memory.Provider` | inmemory, redis | inmemory |
 | `RuntimeAdapter` (Rust) | native, docker | native |
-| `Scheduler` | local, nats | local |
+| `Scheduler` | local, nats | nats (prod) / local (dev) |
 
 ```go
 app, err := bootstrap.FromEnv(ctx)
-// AGENTOS_MODE=dev  -> memory adapters, stub planner
-// AGENTOS_MODE=prod -> nats + postgres + openai
+// AGENTOS_MODE=dev  -> memory adapters + local scheduler + prompt planner
+// AGENTOS_MODE=prod -> nats + postgres + nats scheduler + OpenAI planner when API key is set
 ```
 
 ## Security Model
@@ -244,25 +250,29 @@ app, err := bootstrap.FromEnv(ctx)
         └────────────┘ └────────────┘ └────────────┘
 ```
 
-- Workers register with control plane on startup
+- Workers register with the control plane on startup
 - Periodic heartbeat (default 10s), offline detection (30s timeout)
-- Task dispatch via NATS queue groups (competitive consumer)
-- Least-loaded worker selection
-- Worker pool with lazy gRPC connection caching
+- Production scheduling uses NATS dispatch/result subjects with a dispatcher bridge
+- Dev mode can still execute directly against `AGENTOS_WORKER_ADDR`
+- Worker pool uses least-loaded selection plus lazy gRPC connection caching
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|------------|---------|
-| `AGENTOS_MODE` | dev (memory) or prod (nats+postgres) | prod |
-| `AGENTOS_WORKER_ADDR` | Rust worker gRPC address | localhost:50051 |
-| `AGENTOS_LLM_API_KEY` | LLM API key (enables real planning) | — |
+| `AGENTOS_MODE` | dev (memory + local scheduler) or prod (nats + postgres) | prod |
+| `AGENTOS_WORKER_ADDR` | Direct Rust worker gRPC address for dev/direct execution | localhost:50051 |
+| `AGENTOS_CONTROL_PLANE_ADDR` | Shared controller registry address for remote worker discovery | — |
+| `AGENTOS_SCHEDULER_MODE` | `local` or `nats` | prod: `nats`, dev: `local` |
+| `AGENTOS_API_LISTEN_ADDR` | API server listen address | :8080 |
+| `AGENTOS_LLM_API_KEY` | LLM API key (enables OpenAI planner pipeline) | — |
 | `AGENTOS_LLM_BASE_URL` | LLM API base URL | https://api.openai.com |
 | `AGENTOS_LLM_MODEL` | LLM model name | gpt-4o |
 | `AGENTOS_RUNTIME` | Worker runtime: native or docker | native |
 | `AGENTOS_SECURITY_LEVEL` | supervised, semi, autonomous | supervised |
 | `AGENTOS_DOCKER_IMAGE` | Docker image for container sandbox | ubuntu:22.04 |
 | `AGENTOS_MAX_CONCURRENT_TASKS` | Worker concurrency limit | 4 |
+| `AGENTOS_AGENT_SECRETS` | Agent secret map (`agent=secret,agent2=secret2`) for opaque token injection | — |
 
 ## Test Suite
 
@@ -279,7 +289,7 @@ cd runtime && cargo test --workspace
 | Stage | Focus | Status |
 |-------|-------|--------|
 | Stage 1: MVP | Core pipeline (submit -> plan -> execute -> result) | Done |
-| Stage 2: Agent System | LLM Planner, Agent YAML DSL, Tools, Memory | Done |
+| Stage 2: Agent System | LLM planner pipeline, Agent YAML DSL, Tools, Memory | Done |
 | Stage 3: Sandbox & Policy | Docker isolation, SecurityPolicy, PolicyEngine | Done |
 | Stage 4: Distributed | Worker registry, NATS scheduling, worker pool | Done |
 | Stage 5: Platform | Web UI (Claw Studio), SDK, Agent Marketplace | Planned |

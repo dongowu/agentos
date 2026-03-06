@@ -204,6 +204,9 @@ func (e *EngineImpl) ProcessResults(ctx context.Context) {
 				TaskID:   result.TaskID,
 				ActionID: result.ActionID,
 				ExitCode: result.ExitCode,
+				Stdout:   string(result.Stdout),
+				Stderr:   string(result.Stderr),
+				WorkerID: result.WorkerID,
 				Occurred: time.Now(),
 			})
 			if result.ExitCode != 0 || result.Error != nil {
@@ -265,13 +268,13 @@ func (e *EngineImpl) executeDirect(ctx context.Context, task *taskdsl.Task, acti
 	}
 	result, err := e.executor.ExecuteAction(ctx, task.ID, action)
 	if err != nil {
-		_ = e.bus.Publish(ctx, "task.action.completed", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Occurred: time.Now()})
+		_ = e.bus.Publish(ctx, "task.action.completed", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Error: err.Error(), Occurred: time.Now()})
 		if err := e.transition(ctx, task, Failed); err != nil {
 			return task, err
 		}
 		return e.repo.Get(ctx, task.ID)
 	}
-	_ = e.bus.Publish(ctx, "task.action.completed", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: result.ExitCode, Occurred: time.Now()})
+	_ = e.bus.Publish(ctx, "task.action.completed", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: result.ExitCode, Stdout: string(result.Stdout), Stderr: string(result.Stderr), Occurred: time.Now()})
 	if err := e.transition(ctx, task, Evaluating); err != nil {
 		return task, err
 	}

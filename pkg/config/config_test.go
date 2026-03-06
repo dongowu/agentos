@@ -32,3 +32,12 @@ func TestApplyEnvOverrides_AutoEnablesOpenAIWhenAPIKeyPresent(t *testing.T) {
 		t.Fatalf("expected provider openai, got %q", cfg.LLM.Provider)
 	}
 }
+
+func TestApplyEnvOverrides_SchedulerMode(t *testing.T) {
+	t.Setenv("AGENTOS_SCHEDULER_MODE", "nats")
+
+	cfg := ApplyEnvOverrides(Config{Scheduler: SchedulerConfig{Mode: "local"}})
+	if cfg.Scheduler.Mode != "nats" {
+		t.Fatalf("expected scheduler mode nats, got %q", cfg.Scheduler.Mode)
+	}
+}
