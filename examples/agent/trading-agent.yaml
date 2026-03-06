@@ -1,0 +1,19 @@
+# ClawOS Agent Config
+# Agent is config, not code.
+
+name: trading-agent
+
+model: deepseek-chat
+
+memory:
+  type: redis
+
+tools:
+  - browser
+  - shell
+  - polymarket
+
+workflow:
+  - plan
+  - execute
+  - reflect
