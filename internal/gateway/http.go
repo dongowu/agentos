@@ -10,7 +10,14 @@ import (
 
 // Handler provides ClawOS API: /agent/run, /tool/run.
 type Handler struct {
-	TaskAPI access.TaskSubmissionAPI
+	TaskAPI      access.TaskSubmissionAPI
+	AgentManager AgentLookup
+}
+
+// AgentLookup resolves an agent by name.
+type AgentLookup interface {
+	Get(name string) interface{ CheckPolicy(toolName string) error }
+	List() []string
 }
 
 // NewHandler returns a gateway handler.
@@ -28,6 +35,7 @@ type AgentRunRequest struct {
 type AgentRunResponse struct {
 	TaskID string `json:"task_id"`
 	State  string `json:"state"`
+	Agent  string `json:"agent,omitempty"`
 }
 
 // ToolRunRequest is the body for POST /tool/run.
@@ -54,9 +62,14 @@ func (h *Handler) ServeAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	// MVP: use task as prompt. Agent name used for future routing.
 	prompt := req.Task
-	if req.Agent != "" {
-		// Optional: load agent config for model/memory/tools (future)
-		_ = req.Agent
+	agentName := req.Agent
+	if agentName != "" && h.AgentManager != nil {
+		// Validate agent exists
+		ag := h.AgentManager.Get(agentName)
+		if ag == nil {
+			writeJSONError(w, http.StatusNotFound, "agent not found: "+agentName)
+			return
+		}
 	}
 
 	if h.TaskAPI == nil {
@@ -69,7 +82,7 @@ func (h *Handler) ServeAgentRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(AgentRunResponse{TaskID: resp.TaskID, State: resp.State})
+	json.NewEncoder(w).Encode(AgentRunResponse{TaskID: resp.TaskID, State: resp.State, Agent: agentName})
 }
 
 // ServeAgentStatus handles GET /agent/status?task_id=...
@@ -95,6 +108,23 @@ func (h *Handler) ServeAgentStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(AgentRunResponse{TaskID: resp.TaskID, State: resp.State})
+}
+
+// ServeAgentList handles GET /agent/list.
+func (h *Handler) ServeAgentList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var names []string
+	if h.AgentManager != nil {
+		names = h.AgentManager.List()
+	}
+	if names == nil {
+		names = []string{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"agents": names})
 }
 
 // ServeToolRun handles POST /tool/run.

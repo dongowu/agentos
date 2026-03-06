@@ -1,294 +1,299 @@
 # AgentOS
 
-AgentOS is a hybrid autonomous execution platform with a Go control plane and a Rust runtime plane.
+**AgentOS = Kubernetes for AI Agents**
 
-The design goal is simple: keep planning, orchestration, and persistence in Go; keep isolation, execution, and telemetry in Rust; connect both sides through stable contracts so each piece stays replaceable.
+An open-source Agent execution platform with a Go control plane and a Rust runtime plane. LLMs no longer call tools directly — they run on AgentOS.
+
+Safe. Controllable. Extensible. Distributed.
+
+## Why AgentOS
+
+Current Agent frameworks (LangChain, AutoGPT, CrewAI) are application-layer glue code. They suffer from four critical gaps:
+
+| Problem | AgentOS Solution |
+|---------|-----------------|
+| **Insecure** — AI-generated code runs with host privileges | Rust sandbox with Docker/gVisor isolation, env isolation, secret redaction |
+| **Unscalable** — Fragmented tool ecosystems, no standard ABI | Pluggable Tool interface, 7 built-in tools, OpenClaw skill compatibility |
+| **Unobservable** — Execution is a black box | Event-driven audit trail, telemetry streaming, policy logging |
+| **Not production-ready** — Single-machine demos only | NATS-based distributed scheduling, multi-worker pool, auto-scaling |
 
 ## Architecture
 
-**AgentOS = Kubernetes for AI Agents**
+```
+            [ Client (CLI / API / UI / SDK) ]
+                          |
+  +-----------------------v-----------------------+
+  |              Access Layer (Go)                |
+  |        HTTP Gateway + CLI + Auth              |
+  +-----------------------+-----------------------+
+                          |
+  +-----------------------v-----------------------+
+  |          Orchestration Core (Go)              |
+  |                                               |
+  |  [LLM Planner]  [Task Engine]  [Scheduler]   |
+  |  [Skill Resolver]  [Policy Engine]            |
+  +-----------------------+-----------------------+
+                          |
+  +-----------------------v-----------------------+
+  |         Worker Pool + Registry (Go)           |
+  |  [Registry]  [Health Monitor]  [Pool]         |
+  +-----------------------+-----------------------+
+                          |
+  +-----------------------v-----------------------+
+  |         Execution Workers (Rust)              |
+  |                                               |
+  |  [RuntimeAdapter]  [SecurityPolicy]           |
+  |  [ActionExecutor]  [Registration]             |
+  +-----------------------+-----------------------+
+                          |
+  +-----------------------v-----------------------+
+  |           Execution Sandbox                   |
+  |     [Native]    [Docker]    [WASM (future)]   |
+  +-----------+-----------------------------------+
+              |
+  +-----------v-----------------------------------+
+  |            Tools Ecosystem                    |
+  |  shell / file / git / http / browser (future) |
+  +-----------------------------------------------+
+```
 
-Agent Infrastructure：LLM 不再直接调用工具，而是运行在 AgentOS 上。
+## Core Systems
 
-6 大核心系统：Access → Agent Brain → Task Engine → Skill System → Policy Engine → Runtime.
+| System | Responsibility | Status |
+|--------|---------------|--------|
+| **Access** | HTTP API, CLI, Gateway | Implemented |
+| **Agent Brain** | LLM Planner (OpenAI-compatible), Agent YAML DSL | Implemented |
+| **Task Engine** | State machine, lifecycle transitions | Implemented |
+| **Skill System** | Tool registry, 7 built-in tools, SchemaAware | Implemented |
+| **Policy Engine** | Allow/deny rules, autonomy levels, credential isolation | Implemented |
+| **Runtime** | Rust Worker, NativeRuntime, DockerRuntime, SecurityPolicy | Implemented |
+| **Scheduler** | Worker registry, health monitor, NATS queue, worker pool | Implemented |
+| **Memory** | In-memory + Redis providers, TTL support | Implemented |
 
-详见 [AgentOS v1 Architecture](docs/architecture/agentos-v1-architecture.md)。
+## Quick Start
+
+```bash
+# Terminal 1: Start the Rust worker
+cd runtime && cargo run -p agentos-worker
+
+# Terminal 2: Submit a task
+export AGENTOS_MODE=dev AGENTOS_WORKER_ADDR=localhost:50051
+go run ./cmd/osctl submit "echo hello"
+# Output: task task-xxx created (state: succeeded)
+```
+
+With LLM planning:
+
+```bash
+export AGENTOS_MODE=dev \
+       AGENTOS_WORKER_ADDR=localhost:50051 \
+       AGENTOS_LLM_API_KEY=sk-xxx \
+       AGENTOS_LLM_BASE_URL=https://api.openai.com \
+       AGENTOS_LLM_MODEL=gpt-4o
+go run ./cmd/osctl submit "create a hello world python script"
+```
+
+## Agent DSL
+
+Agents are config, not code:
+
+```yaml
+name: defi-trading-agent
+description: "Monitors markets and executes trades."
+model: gpt-4o
+
+memory:
+  type: redis
+  ttl: 86400
+
+tools:
+  - http.get
+  - http.post
+  - shell
+
+policy:
+  allow: ["http.*"]
+  deny: ["shell"]
+
+workflow:
+  - plan
+  - execute
+  - reflect
+```
+
+## Built-in Tools
+
+| Tool | Description |
+|------|------------|
+| `shell` | Execute shell commands (with sandbox) |
+| `file.read` | Read file contents |
+| `file.write` | Write files (auto-creates dirs) |
+| `git.clone` | Clone git repositories |
+| `git.status` | Get git status |
+| `http.get` | HTTP GET requests |
+| `http.post` | HTTP POST requests |
+
+## Repository Layout
+
+```
+agentos/
+├── api/
+│   ├── proto/agentos/v1/          # Protobuf contracts (Go <-> Rust)
+│   └── gen/                       # Generated Go gRPC code
+├── cmd/
+│   ├── apiserver/                 # HTTP + WebSocket API server
+│   ├── controller/                # Orchestration loop
+│   ├── claw-cli/                  # ClawOS CLI
+│   └── osctl/                     # Developer CLI
+├── internal/
+│   ├── access/                    # HTTP handlers, CLI wiring, auth
+│   ├── adapters/
+│   │   ├── llm/openai/            # OpenAI-compatible LLM adapter
+│   │   ├── memory/{inmemory,redis}/ # Memory providers
+│   │   ├── messaging/{memory,nats}/ # EventBus adapters
+│   │   ├── persistence/{memory,postgres}/ # TaskRepository adapters
+│   │   └── runtimeclient/         # gRPC executor client
+│   ├── agent/                     # Agent YAML DSL, runtime, manager
+│   ├── bootstrap/                 # Dependency wiring from config
+│   ├── gateway/                   # HTTP API (/agent/run, /tool/run)
+│   ├── memory/                    # Memory interface + builder factory
+│   ├── orchestration/             # TaskEngine, Planner, StateMachine
+│   ├── policy/                    # PolicyEngine, rules, credential vault
+│   ├── scheduler/                 # Local + NATS task schedulers
+│   ├── tool/builtin/              # 7 built-in tools (shell,file,git,http)
+│   └── worker/                    # Registry, health monitor, pool
+├── pkg/
+│   ├── config/                    # All system configuration
+│   ├── events/                    # Domain events
+│   └── taskdsl/                   # Task, Plan, Action types
+├── runtime/
+│   └── crates/
+│       ├── worker/                # Rust gRPC worker + executor
+│       ├── sandbox/               # RuntimeAdapter, NativeRuntime, DockerRuntime
+│       └── telemetry/             # Streaming telemetry models
+├── deploy/                        # Docker Compose (NATS + Postgres)
+└── examples/
+    ├── agents/                    # Example agent YAML configs
+    └── basic-task/
+```
+
+## Pluggable Adapters
+
+| Interface | Adapters | Default |
+|-----------|----------|---------|
+| `EventBus` | memory, nats | nats |
+| `TaskRepository` | memory, postgres | postgres |
+| `Planner` | stub, openai (LLM) | stub |
+| `Memory.Provider` | inmemory, redis | inmemory |
+| `RuntimeAdapter` (Rust) | native, docker | native |
+| `Scheduler` | local, nats | local |
+
+```go
+app, err := bootstrap.FromEnv(ctx)
+// AGENTOS_MODE=dev  -> memory adapters, stub planner
+// AGENTOS_MODE=prod -> nats + postgres + openai
+```
+
+## Security Model
+
+**Go Control Plane (inspired by HiClaw):**
+- PolicyEngine: allow/deny rules with glob matching, deny-takes-precedence
+- AutonomyLevel: Supervised / SemiAutonomous / Autonomous
+- CredentialVault: workers get opaque tokens, real secrets only in gateway
+- Rate limiting per agent (actions/hour)
+- Dangerous command blacklist (rm -rf, dd, mkfs, etc.)
+
+**Rust Worker (inspired by ZeroClaw):**
+- SecurityPolicy: command whitelist/blacklist, forbidden paths
+- Environment isolation: clear env, re-add only safe vars
+- Secret redaction: detects API keys, Bearer tokens, AWS keys in output
+- Output truncation: configurable max bytes (default 1MB)
+- Timeout enforcement per action
+- Docker isolation: --read-only, --network none, resource limits
+
+## Distributed Architecture
+
+```
+                    ┌─────────────────┐
+                    │   Go Control    │
+                    │     Plane       │
+                    │                 │
+                    │  ┌───────────┐  │
+                    │  │ Scheduler │  │
+                    │  └─────┬─────┘  │
+                    │        │        │
+                    │  ┌─────▼─────┐  │
+                    │  │  Worker   │  │
+                    │  │ Registry  │  │
+                    │  └─────┬─────┘  │
+                    └────────┼────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+        ┌─────▼─────┐ ┌─────▼─────┐ ┌─────▼─────┐
+        │  Worker 1  │ │  Worker 2  │ │  Worker N  │
+        │  (Rust)    │ │  (Rust)    │ │  (Rust)    │
+        │ native/    │ │ docker/    │ │ docker/    │
+        │ docker     │ │ native     │ │ wasm       │
+        └────────────┘ └────────────┘ └────────────┘
+```
+
+- Workers register with control plane on startup
+- Periodic heartbeat (default 10s), offline detection (30s timeout)
+- Task dispatch via NATS queue groups (competitive consumer)
+- Least-loaded worker selection
+- Worker pool with lazy gRPC connection caching
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|------------|---------|
+| `AGENTOS_MODE` | dev (memory) or prod (nats+postgres) | prod |
+| `AGENTOS_WORKER_ADDR` | Rust worker gRPC address | localhost:50051 |
+| `AGENTOS_LLM_API_KEY` | LLM API key (enables real planning) | — |
+| `AGENTOS_LLM_BASE_URL` | LLM API base URL | https://api.openai.com |
+| `AGENTOS_LLM_MODEL` | LLM model name | gpt-4o |
+| `AGENTOS_RUNTIME` | Worker runtime: native or docker | native |
+| `AGENTOS_SECURITY_LEVEL` | supervised, semi, autonomous | supervised |
+| `AGENTOS_DOCKER_IMAGE` | Docker image for container sandbox | ubuntu:22.04 |
+| `AGENTOS_MAX_CONCURRENT_TASKS` | Worker concurrency limit | 4 |
+
+## Test Suite
+
+```bash
+# Go tests (13 test suites)
+go test ./...
+
+# Rust tests (5 test suites, 69+ tests)
+cd runtime && cargo test --workspace
+```
+
+## Roadmap
+
+| Stage | Focus | Status |
+|-------|-------|--------|
+| Stage 1: MVP | Core pipeline (submit -> plan -> execute -> result) | Done |
+| Stage 2: Agent System | LLM Planner, Agent YAML DSL, Tools, Memory | Done |
+| Stage 3: Sandbox & Policy | Docker isolation, SecurityPolicy, PolicyEngine | Done |
+| Stage 4: Distributed | Worker registry, NATS scheduling, worker pool | Done |
+| Stage 5: Platform | Web UI (Claw Studio), SDK, Agent Marketplace | Planned |
 
 ## Documentation
 
-- [ClawOS v1 架构](docs/architecture/clawos-v1-architecture.md) - 一步到位，可直接开干
-- [AgentOS v1 Architecture](docs/architecture/agentos-v1-architecture.md) - 完整架构定型
-- [Monorepo 最终版结构](docs/architecture/monorepo-structure.md) - 10 万行可扩展目录
 - [Architecture Overview](docs/architecture/overview.md)
+- [AgentOS v1 Architecture](docs/architecture/agentos-v1-architecture.md)
+- [ClawOS v1 Architecture](docs/architecture/clawos-v1-architecture.md)
+- [Monorepo Structure](docs/architecture/monorepo-structure.md)
 - [Pluggable Adapters](docs/architecture/adapters.md)
 - [Skill System](docs/architecture/skill-system.md)
 - [Policy Engine](docs/architecture/policy-engine.md)
 - [MVP Scope](docs/architecture/mvp-scope.md)
 - [Bootstrap Plan](docs/plans/2026-03-06-agentos-bootstrap-plan.md)
 
-## Repository Layout
+## Contributing
 
-```text
-agentos/
-├─ api/
-│  └─ proto/
-├─ cmd/
-│  ├─ apiserver/
-│  ├─ controller/
-│  └─ osctl/
-├─ docs/
-│  ├─ architecture/
-│  └─ plans/
-├─ internal/
-│  ├─ access/
-│  ├─ adapters/
-│  │  ├─ messaging/
-│  │  │  ├─ memory/
-│  │  │  └─ nats/
-│  │  └─ persistence/
-│  │     ├─ memory/
-│  │     └─ postgres/
-│  ├─ bootstrap/
-│  ├─ messaging/
-│  ├─ orchestration/
-│  ├─ persistence/
-│  └─ runtimeclient/
-├─ pkg/
-│  ├─ events/
-│  └─ taskdsl/
-├─ runtime/
-│  └─ crates/
-├─ deploy/
-└─ examples/
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
-## Plug-in Boundaries
+## License
 
-The system is intentionally interface-first so the major subsystems remain pluggable.
-
-### Access Layer Interfaces
-
-- `TaskSubmissionAPI`
-  - Accepts task creation requests from HTTP or CLI.
-  - Returns task IDs and streaming handles.
-- `AuthProvider`
-  - Validates tokens and resolves tenant identity.
-  - Can later support JWT, GitHub OAuth, or Google OAuth.
-
-### Orchestration Layer Interfaces
-
-- `Planner`
-  - Converts a prompt into a structured `Plan`.
-  - Different implementations can target Gemini, GPT, Claude, or a local model.
-- `TaskEngine`
-  - Owns task lifecycle transitions and retries.
-  - Decides when a task moves from `pending` to `planning`, `queued`, `running`, and final states.
-- `SkillResolver`
-  - Maps an `Action` to the right execution profile.
-  - Lets future skills stay declarative instead of hardcoded in the controller.
-- `MemoryProvider`
-  - Optional lookup layer for long-term memory and retrieval.
-  - Kept as an interface so MVP can ship without vector DB coupling.
-
-### Messaging & Persistence Interfaces
-
-- `EventBus`
-  - Publishes and subscribes to domain events.
-  - Adapters: `memory`, `nats` (default).
-- `TaskRepository`
-  - Persists tasks, plans, and execution history.
-  - Adapters: `memory`, `postgres` (default).
-- `AuditLogStore`
-  - Stores command traces, side effects, and execution metadata.
-  - Forms the base for future compliance and SaaS observability.
-
-### Execution Layer Interfaces
-
-- `RuntimeBroker`
-  - Requests and releases runtime leases for tasks.
-  - Shields the Go control plane from Docker, gVisor, or Firecracker details.
-- `ExecutorClient`
-  - Sends actions to the Rust worker and receives structured results.
-  - Will be backed by protobuf and gRPC contracts.
-- `IsolationProvider`
-  - Rust-side abstraction over the isolation backend.
-  - Implementations can be `DockerProvider`, `GVisorProvider`, or `FirecrackerProvider`.
-- `TelemetryStreamer`
-  - Emits stdout, stderr, resource usage, and screen artifacts.
-  - Lets UI and CLI reuse one streaming model.
-
-## MVP Scope
-
-The first milestone proves a single happy-path flow:
-
-1. Submit a task through CLI or HTTP.
-2. Convert prompt to a `Plan`.
-3. Dispatch a single `Action`.
-4. Execute the action in a Rust-managed sandbox.
-5. Stream logs back to the control plane.
-6. Persist final task state.
-
-The MVP explicitly does not include:
-
-- Browser automation
-- Firecracker isolation
-- Vector memory
-- Web3 transaction signing
-- Full dashboard UI
-- Multi-model routing complexity
-
-## What Each Part Will Build
-
-### `cmd/apiserver`
-- Starts the HTTP and WebSocket API.
-- Exposes task submission and task stream endpoints.
-
-### `cmd/controller`
-- Runs the orchestration loop.
-- Loads planner, repositories, event bus, and runtime client adapters.
-
-### `cmd/osctl`
-- Provides a local developer CLI for submitting tasks and watching progress.
-
-### `internal/access`
-- HTTP handlers, CLI command wiring, auth middleware, and request DTOs.
-
-### `internal/orchestration`
-- Task state machine, planner adapters, skill resolution, and task execution decisions.
-
-### `internal/bootstrap`
-- Config-based dependency wiring. Selects EventBus and TaskRepository adapters from `pkg/config`.
-
-### `internal/adapters`
-- Pluggable implementations: `messaging/memory`, `messaging/nats`, `persistence/memory`, `persistence/postgres`.
-
-### `internal/messaging`
-- EventBus interface. Implementations in `internal/adapters/messaging/`.
-
-### `internal/persistence`
-- TaskRepository interface. Implementations in `internal/adapters/persistence/`.
-
-### `internal/runtimeclient`
-- Go-side gRPC client that talks to Rust workers through stable contracts.
-
-### `pkg/config`
-- Adapter configuration (MessagingConfig, PersistenceConfig). `Default()` and `Dev()` presets.
-
-### `pkg/taskdsl`
-- Domain-safe definitions for `Task`, `Plan`, `Action`, and execution metadata.
-
-### `pkg/events`
-- Domain events that describe task lifecycle transitions and action results.
-
-### `api/proto`
-- Versioned contracts shared between Go and Rust.
-
-### `runtime/crates/worker`
-- Rust worker process that receives execution requests and controls sandbox lifecycles.
-
-### `runtime/crates/sandbox`
-- Isolation abstractions and backend providers.
-
-### `runtime/crates/telemetry`
-- Reusable telemetry models and stream helpers.
-
-## Interface-First Example
-
-```go
-type Planner interface {
-	Plan(ctx context.Context, input PlanInput) (Plan, error)
-}
-
-type RuntimeBroker interface {
-	Acquire(ctx context.Context, spec RuntimeSpec) (RuntimeLease, error)
-	Release(ctx context.Context, leaseID string) error
-}
-
-type EventBus interface {
-	Publish(ctx context.Context, event DomainEvent) error
-}
-```
-
-```rust
-#[async_trait::async_trait]
-pub trait IsolationProvider {
-    async fn start(&self, spec: SandboxSpec) -> Result<SandboxHandle, SandboxError>;
-    async fn stop(&self, sandbox_id: &str) -> Result<(), SandboxError>;
-}
-```
-
-These interfaces are the contract seams that keep AgentOS modular.
-
-## Plugin Architecture
-
-The system uses a **pluggable architecture + built-in default adapters**. Interfaces live in `internal/messaging` and `internal/persistence`; implementations live in `internal/adapters`.
-
-### Bootstrap
-
-`internal/bootstrap` wires adapters from `pkg/config`:
-
-```go
-app, err := bootstrap.FromEnv(ctx)
-// AGENTOS_MODE=dev  -> memory adapters
-// otherwise         -> NATS + Postgres (default)
-```
-
-Or with explicit config:
-
-```go
-cfg := config.Default()  // nats + postgres
-cfg := config.Dev()     // memory for both
-app, err := bootstrap.New(ctx, cfg)
-```
-
-### Built-in Adapters
-
-| Interface | Provider | Package |
-|-----------|----------|---------|
-| `EventBus` | `memory` | `internal/adapters/messaging/memory` |
-| `EventBus` | `nats` | `internal/adapters/messaging/nats` |
-| `TaskRepository` | `memory` | `internal/adapters/persistence/memory` |
-| `TaskRepository` | `postgres` | `internal/adapters/persistence/postgres` |
-
-**Defaults:** `messaging=nats`, `persistence=postgres`. Set `AGENTOS_MODE=dev` to use in-memory adapters for local development.
-
-### Adding a Custom Adapter
-
-1. Implement the interface in a new package under `internal/adapters/`.
-2. Add a case in `bootstrap.newEventBus` or `bootstrap.newTaskRepository`.
-3. Extend `pkg/config` if the adapter needs new config fields.
-
-## Framework Status
-
-The repository now has the initial project framework in place:
-
-- `README`, architecture docs, contribution guide, and execution plan
-- Go monorepo layout with `cmd`, `internal`, and `pkg` boundaries
-- Core domain types for `Task`, `Plan`, `Action`, and lifecycle events
-- Interface-first control-plane contracts for access, orchestration, messaging, persistence, and runtime clients
-- Versioned protobuf contracts under `api/proto/agentos/v1`
-- Rust workspace with `worker`, `sandbox`, and `telemetry` crates
-- Local development infrastructure with NATS and PostgreSQL compose stubs
-- CI skeleton for Go and Rust test execution
-
-## Next Build Steps
-
-The next implementation layers should be added on top of this framework in order:
-
-1. ~~Wire `TaskSubmissionAPI` into HTTP and CLI adapters.~~ (done)
-2. ~~Make `TaskEngine` use `Planner`, `SkillResolver`, `TaskRepository`, and `EventBus` together.~~ (done)
-3. ~~Replace in-memory adapters with NATS and PostgreSQL implementations.~~ (done: pluggable adapters, default nats+postgres)
-4. ~~Expose `WorkerService` through a real gRPC server in Rust.~~ (done)
-5. ~~Add one end-to-end happy path from task submission to action completion.~~ (done)
-
-## End-to-End Flow
-
-```bash
-# Terminal 1: Start the Rust worker
-cd runtime && cargo run -p agentos-worker
-
-# Terminal 2: Submit a task (with worker)
-$env:AGENTOS_MODE='dev'; $env:AGENTOS_WORKER_ADDR='localhost:50051'
-go run ./cmd/osctl submit "echo hello"
-# Output: task task-xxx created (state: succeeded)
-```
+AgentOS is open source. See individual files for license information.

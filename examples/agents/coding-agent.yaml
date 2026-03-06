@@ -1,0 +1,28 @@
+# ClawOS Agent Config
+# A coding assistant agent with file, git, and shell access.
+
+name: coding-agent
+description: "An autonomous coding agent that can read, write, and refactor code."
+
+model: gemini-3.5-pro
+
+memory:
+  type: redis
+  ttl: 86400
+
+tools:
+  - file.read
+  - file.write
+  - git.commit
+  - git.diff
+  - shell.exec
+  - browser.search
+
+policy:
+  allow: ["file.*", "git.*", "browser.*"]
+  deny: ["shell.rm"]
+
+workflow:
+  - plan
+  - execute
+  - reflect

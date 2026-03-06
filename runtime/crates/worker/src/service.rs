@@ -1,12 +1,19 @@
+//! Legacy WorkerService -- delegates to the old IsolationProvider interface.
+//!
+//! Kept for backward compatibility. New code should use `executor::ActionExecutor`.
+
+#[allow(deprecated)]
 use agentos_sandbox::{IsolationProvider, SandboxHandle, SandboxSpec};
 
 /// WorkerService owns the execution-facing worker lifecycle.
 ///
-/// In later phases this will be wrapped by a gRPC service implementation.
+/// **Deprecated:** Use [`crate::executor::ActionExecutor`] instead.
+#[deprecated(note = "Use executor::ActionExecutor instead")]
 pub struct WorkerService<P> {
     provider: P,
 }
 
+#[allow(deprecated)]
 impl<P> WorkerService<P>
 where
     P: IsolationProvider,
