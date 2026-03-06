@@ -7,13 +7,15 @@ import (
 	"strings"
 
 	"github.com/dongowu/agentos/internal/access"
+	"github.com/dongowu/agentos/internal/gateway"
 )
 
-// Server exposes the HTTP API for task submission and streaming.
+// Server exposes the HTTP API for task submission, agent run, and tool run.
 type Server struct {
-	Addr string
-	API  access.TaskSubmissionAPI
-	srv  *http.Server
+	Addr    string
+	API     access.TaskSubmissionAPI
+	Gateway *gateway.Handler
+	srv     *http.Server
 }
 
 // Start begins listening.
@@ -34,6 +36,12 @@ func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/tasks", s.handleTasks)
 	mux.HandleFunc("/v1/tasks/", s.handleTaskByID)
+	// ClawOS API
+	if s.Gateway != nil {
+		mux.HandleFunc("/agent/run", s.Gateway.ServeAgentRun)
+		mux.HandleFunc("/agent/status", s.Gateway.ServeAgentStatus)
+		mux.HandleFunc("/tool/run", s.Gateway.ServeToolRun)
+	}
 	return mux
 }
 
