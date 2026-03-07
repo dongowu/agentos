@@ -162,10 +162,27 @@ if [[ "$FINAL_STATE" != "succeeded" ]]; then
   exit 1
 fi
 
+echo "[acceptance] verifying task audit API"
+TASK_AUDIT=$(curl -fsS "http://$API_ADDR/v1/tasks/$TASK_ID/audit")
+ACTION_ID=$(printf '%s' "$TASK_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; assert records, "no audit records returned"; print(records[0]["action_id"])')
+if [[ -z "$ACTION_ID" ]]; then
+  echo "failed to parse action_id from task audit response: $TASK_AUDIT"
+  exit 1
+fi
+
+echo "[acceptance] verifying action audit API for action_id=$ACTION_ID"
+ACTION_AUDIT=$(curl -fsS "http://$API_ADDR/v1/tasks/$TASK_ID/actions/$ACTION_ID/audit")
+ACTION_EXIT=$(printf '%s' "$ACTION_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get("exit_code", ""))')
+if [[ "$ACTION_EXIT" != "0" ]]; then
+  echo "unexpected action audit exit code: $ACTION_AUDIT"
+  exit 1
+fi
+
 echo "[acceptance] success"
 echo "- controller: $CTRL_ADDR"
 echo "- apiserver:  $API_ADDR"
 echo "- worker:     $WORKER_ADDR"
 echo "- task_id:    $TASK_ID"
+echo "- action_id:  $ACTION_ID"
 echo "- final:      $FINAL_STATE"
-echo "- evidence:   worker registered and task succeeded through remote scheduler"
+echo "- evidence:   worker registered, task succeeded, and audit endpoints returned persisted records"

@@ -21,7 +21,7 @@ type streamBus struct {
 }
 
 func newStreamBus() *streamBus {
-	return &streamBus{handlers: make(map[string][]func(any)), subscribed: make(chan string, 8)}
+	return &streamBus{handlers: make(map[string][]func(any)), subscribed: make(chan string, 16)}
 }
 
 func (b *streamBus) Publish(_ context.Context, topic string, payload any) error {
@@ -86,7 +86,7 @@ func TestServer_TaskStream_EmitsActionCompletedTelemetry(t *testing.T) {
 		close(done)
 	}()
 
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 5; i++ {
 		select {
 		case <-bus.subscribed:
 		case <-time.After(time.Second):
@@ -112,5 +112,54 @@ func TestServer_TaskStream_EmitsActionCompletedTelemetry(t *testing.T) {
 	}
 	if !strings.Contains(body, "\"stdout\":\"hello\"") {
 		t.Fatalf("expected stdout in stream body, got %q", body)
+	}
+}
+
+func TestServer_ActionStream_EmitsRuntimeOutputAndCompletion(t *testing.T) {
+	bus := newStreamBus()
+	srv := &Server{API: stubTaskAPI{}, Bus: bus}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/task-123/actions/act-1/stream", nil).WithContext(ctx)
+	rec := newFlushBuffer()
+	done := make(chan struct{})
+	go func() {
+		srv.handler().ServeHTTP(rec, req)
+		close(done)
+	}()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-bus.subscribed:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for action stream subscriptions")
+		}
+	}
+
+	if err := bus.Publish(context.Background(), "task.action.output", &events.ActionOutputChunk{TaskID: "task-123", ActionID: "act-1", Kind: "stdout", Text: "hello"}); err != nil {
+		t.Fatalf("Publish output: %v", err)
+	}
+	if err := bus.Publish(context.Background(), "task.action.completed", &events.ActionCompleted{TaskID: "task-123", ActionID: "act-1", ExitCode: 0}); err != nil {
+		t.Fatalf("Publish completed: %v", err)
+	}
+	cancel()
+	<-done
+
+	if rec.code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.code)
+	}
+	body := rec.String()
+	if !strings.Contains(body, "event: task.action.output") {
+		t.Fatalf("expected task.action.output event, got %q", body)
+	}
+	if !strings.Contains(body, "event: task.action.completed") {
+		t.Fatalf("expected task.action.completed event, got %q", body)
+	}
+	if !strings.Contains(body, "\"action_id\":\"act-1\"") {
+		t.Fatalf("expected action id in action stream body, got %q", body)
+	}
+	if !strings.Contains(body, "\"text\":\"hello\"") {
+		t.Fatalf("expected output chunk text in action stream body, got %q", body)
 	}
 }

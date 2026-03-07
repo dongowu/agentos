@@ -27,7 +27,7 @@ pub struct WorkerConfig {
 impl Default for WorkerConfig {
     fn default() -> Self {
         Self {
-            listen_addr: "[::1]:50051".into(),
+            listen_addr: "127.0.0.1:50051".into(),
             runtime: RuntimeConfig::default(),
             security: SecurityPolicy::default(),
             worker_id: generate_worker_id(),
@@ -72,7 +72,7 @@ impl WorkerConfig {
     /// Load configuration from environment variables.
     ///
     /// Supported variables:
-    /// - `AGENTOS_LISTEN_ADDR` -- gRPC listen address (default: `[::1]:50051`)
+    /// - `AGENTOS_LISTEN_ADDR` -- gRPC listen address (default: `127.0.0.1:50051`)
     /// - `AGENTOS_RUNTIME` -- `native` or `docker` (default: `native`)
     /// - `AGENTOS_DOCKER_IMAGE` -- Docker image (default: `ubuntu:22.04`)
     /// - `AGENTOS_DOCKER_MEMORY_MB` -- Docker memory limit in MB (default: `512`)
@@ -90,7 +90,7 @@ impl WorkerConfig {
     /// - `AGENTOS_MAX_CONCURRENT_TASKS` -- Max concurrent tasks (default: `4`)
     pub fn from_env() -> Self {
         let listen_addr =
-            std::env::var("AGENTOS_LISTEN_ADDR").unwrap_or_else(|_| "[::1]:50051".into());
+            std::env::var("AGENTOS_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:50051".into());
 
         let worker_id = std::env::var("AGENTOS_WORKER_ID").unwrap_or_else(|_| generate_worker_id());
 
@@ -189,7 +189,7 @@ mod tests {
         let cfg = WorkerConfig::default();
         assert_eq!(cfg.runtime.kind, "native");
         assert_eq!(cfg.security.autonomy, AutonomyLevel::Supervised);
-        assert_eq!(cfg.listen_addr, "[::1]:50051");
+        assert_eq!(cfg.listen_addr, "127.0.0.1:50051");
         assert!(!cfg.worker_id.is_empty());
         assert_eq!(cfg.control_plane_addr, None);
         assert_eq!(cfg.heartbeat_interval_secs, 10);

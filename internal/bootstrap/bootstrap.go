@@ -23,6 +23,7 @@ import (
 	"github.com/dongowu/agentos/internal/scheduler"
 	"github.com/dongowu/agentos/internal/worker"
 	"github.com/dongowu/agentos/pkg/config"
+	"github.com/dongowu/agentos/pkg/events"
 
 	_ "github.com/dongowu/agentos/internal/adapters/defaults"
 	_ "github.com/dongowu/agentos/internal/tool/builtin"
@@ -32,6 +33,7 @@ import (
 type App struct {
 	Config         config.Config
 	Repo           persistence.TaskRepository
+	Audit          persistence.AuditLogStore
 	Bus            messaging.EventBus
 	Engine         orchestration.TaskEngine
 	Planner        orchestration.Planner
@@ -74,10 +76,10 @@ func plannerFromConfig(cfg config.Config) orchestration.Planner {
 	return orchestration.NewFallbackPlanner(llmPlanner, promptPlanner)
 }
 
-func schedulerFromConfig(ctx context.Context, cfg config.Config, pool scheduler.WorkerPool, startDispatcher bool) (scheduler.Scheduler, []io.Closer, error) {
+func schedulerFromConfig(ctx context.Context, cfg config.Config, pool scheduler.WorkerPool, startDispatcher bool, outputHook func(runtimeclient.StreamChunk)) (scheduler.Scheduler, []io.Closer, error) {
 	switch cfg.Scheduler.Mode {
 	case "", "local":
-		sched := scheduler.NewLocalScheduler(pool)
+		sched := scheduler.NewLocalScheduler(pool).WithOutputHook(outputHook)
 		return sched, []io.Closer{sched}, nil
 	case "nats":
 		nc, js, stream, err := adapternats.OpenJetStream(cfg.Messaging.NATS.URL, cfg.Messaging.NATS.Stream)
@@ -90,7 +92,7 @@ func schedulerFromConfig(ctx context.Context, cfg config.Config, pool scheduler.
 			return nil
 		}), sched}
 		if startDispatcher {
-			dispatcher := scheduler.NewNATSDispatcherFromJetStream(js, stream, pool)
+			dispatcher := scheduler.NewNATSDispatcherFromJetStream(js, stream, pool).WithOutputHook(outputHook)
 			if err := dispatcher.Start(ctx); err != nil {
 				nc.Close()
 				return nil, nil, fmt.Errorf("start dispatcher: %w", err)
@@ -103,6 +105,20 @@ func schedulerFromConfig(ctx context.Context, cfg config.Config, pool scheduler.
 	}
 }
 
+func emitActionOutput(bus messaging.EventBus, chunk runtimeclient.StreamChunk) {
+	if bus == nil {
+		return
+	}
+	_ = bus.Publish(context.Background(), "task.action.output", &events.ActionOutputChunk{
+		TaskID:   chunk.TaskID,
+		ActionID: chunk.ActionID,
+		Kind:     chunk.Kind,
+		Data:     append([]byte(nil), chunk.Data...),
+		Text:     string(chunk.Data),
+		Occurred: time.Now(),
+	})
+}
+
 // New builds an App from config.
 func New(ctx context.Context, cfg config.Config) (*App, error) {
 	bus, err := adapter.NewEventBus(cfg.Messaging)
@@ -113,6 +129,10 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	repo, err := adapter.NewTaskRepo(ctx, cfg.Persistence)
 	if err != nil {
 		return nil, fmt.Errorf("task repository: %w", err)
+	}
+	audit, err := adapter.NewAuditLogStore(ctx, cfg.Persistence)
+	if err != nil {
+		return nil, fmt.Errorf("audit log store: %w", err)
 	}
 
 	planner := plannerFromConfig(cfg)
@@ -167,8 +187,11 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	workerPool := worker.NewPool(workerReg, worker.NewGRPCDialer())
 	closers = append(closers, workerPool)
 
+	outputHook := func(chunk runtimeclient.StreamChunk) {
+		emitActionOutput(bus, chunk)
+	}
 	startDispatcher := cfg.Scheduler.Mode == "nats" && cfg.Scheduler.ControlPlaneAddr == ""
-	sched, schedClosers, err := schedulerFromConfig(ctx, cfg, workerPool, startDispatcher)
+	sched, schedClosers, err := schedulerFromConfig(ctx, cfg, workerPool, startDispatcher, outputHook)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: %w", err)
 	}
@@ -185,13 +208,15 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 	engine := orchestration.NewEngineImpl(repo, bus, planner, resolver, executor, policyEngine, sched).
 		WithMemoryHook(memoryHook).
-		WithVault(vault)
+		WithVault(vault).
+		WithAuditStore(audit)
 
 	go engine.ProcessResults(ctx)
 
 	app := &App{
 		Config:         cfg,
 		Repo:           repo,
+		Audit:          audit,
 		Bus:            bus,
 		Engine:         engine,
 		Planner:        planner,
@@ -208,6 +233,9 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		app.closers = append(app.closers, c)
 	}
 	if c, ok := repo.(io.Closer); ok {
+		app.closers = append(app.closers, c)
+	}
+	if c, ok := audit.(io.Closer); ok {
 		app.closers = append(app.closers, c)
 	}
 	return app, nil

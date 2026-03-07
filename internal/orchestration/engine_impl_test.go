@@ -9,6 +9,7 @@ import (
 
 	msgmemory "github.com/dongowu/agentos/internal/adapters/messaging/memory"
 	persmemory "github.com/dongowu/agentos/internal/adapters/persistence/memory"
+	"github.com/dongowu/agentos/internal/persistence"
 	"github.com/dongowu/agentos/internal/policy"
 	"github.com/dongowu/agentos/internal/runtimeclient"
 	"github.com/dongowu/agentos/internal/scheduler"
@@ -343,5 +344,109 @@ func TestEngineImpl_NilPolicyAndScheduler_BackwardCompat(t *testing.T) {
 	// With no executor and no scheduler, should reach queued
 	if task.State != string(Queued) {
 		t.Errorf("expected state queued, got %s", task.State)
+	}
+}
+
+type mockAuditStore struct {
+	records []persistence.AuditRecord
+}
+
+func (m *mockAuditStore) Append(_ context.Context, record persistence.AuditRecord) error {
+	m.records = append(m.records, record)
+	return nil
+}
+
+func (m *mockAuditStore) Get(_ context.Context, taskID, actionID string) (*persistence.AuditRecord, error) {
+	for i := range m.records {
+		if m.records[i].TaskID == taskID && m.records[i].ActionID == actionID {
+			record := m.records[i]
+			return &record, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockAuditStore) ListByTask(_ context.Context, taskID string) ([]persistence.AuditRecord, error) {
+	var out []persistence.AuditRecord
+	for _, record := range m.records {
+		if record.TaskID == taskID {
+			out = append(out, record)
+		}
+	}
+	return out, nil
+}
+
+func TestEngineImpl_ProcessResults_AppendsAuditRecord(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &StubPlanner{}
+	sched := newMockScheduler()
+	audit := &mockAuditStore{}
+	engine := NewEngineImpl(repo, bus, planner, nil, nil, nil, sched).WithAuditStore(audit)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	task, err := engine.StartTask(ctx, "echo hello")
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+
+	go engine.ProcessResults(ctx)
+	sched.results <- scheduler.ActionResult{
+		TaskID:   task.ID,
+		ActionID: "action-1",
+		ExitCode: 0,
+		Stdout:   []byte("done"),
+		Stderr:   []byte("warn"),
+		WorkerID: "worker-1",
+	}
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if len(audit.records) == 1 {
+			break
+		}
+	}
+	if len(audit.records) != 1 {
+		t.Fatalf("expected 1 audit record, got %d", len(audit.records))
+	}
+	record := audit.records[0]
+	if record.TaskID != task.ID || record.ActionID != "action-1" {
+		t.Fatalf("unexpected record identity: %+v", record)
+	}
+	if record.Command != "echo ok" {
+		t.Fatalf("expected command echo ok, got %q", record.Command)
+	}
+	if record.WorkerID != "worker-1" {
+		t.Fatalf("expected worker worker-1, got %q", record.WorkerID)
+	}
+	if record.Stdout != "done" || record.Stderr != "warn" {
+		t.Fatalf("unexpected audit outputs: %+v", record)
+	}
+}
+
+func TestEngineImpl_DirectExecution_AppendsAuditRecord(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &StubPlanner{}
+	exec := &mockExecutor{result: &runtimeclient.ExecutionResult{ExitCode: 0, Stdout: []byte("done"), Stderr: []byte("warn")}}
+	audit := &mockAuditStore{}
+	engine := NewEngineImpl(repo, bus, planner, nil, exec, nil, nil).WithAuditStore(audit)
+	ctx := context.Background()
+
+	task, err := engine.StartTask(ctx, "echo hello")
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if task.State != string(Succeeded) {
+		t.Fatalf("expected state succeeded, got %s", task.State)
+	}
+	if len(audit.records) != 1 {
+		t.Fatalf("expected 1 audit record, got %d", len(audit.records))
+	}
+	record := audit.records[0]
+	if record.Command != "echo ok" {
+		t.Fatalf("expected command echo ok, got %q", record.Command)
+	}
+	if record.Stdout != "done" || record.Stderr != "warn" {
+		t.Fatalf("unexpected audit outputs: %+v", record)
 	}
 }

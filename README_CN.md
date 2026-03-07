@@ -68,6 +68,7 @@
 | **Policy Engine 策略引擎** | 允许/拒绝规则、自治级别、凭证隔离 | 已实现 |
 | **Runtime 运行时** | Rust Worker、NativeRuntime、DockerRuntime、SecurityPolicy | 已实现 |
 | **Scheduler 调度器** | Worker 注册、健康监测、NATS 队列、Worker 池 | 已实现 |
+| **Audit 审计存储** | 平台级持久化 task/action 审计记录 | 已实现 |
 | **Memory 记忆系统** | 内存 + Redis 提供者、TTL 支持 | 已实现 |
 
 ## 快速开始
@@ -97,9 +98,11 @@ export AGENTOS_MODE=dev \
 go run ./cmd/osctl submit "创建一个 hello world Python 脚本"
 ```
 
-HTTP 网关当前暴露 `/health`、`/agent/run`、`/agent/status`、`/agent/list`、`/tool/run`，以及用于任务遥测的 `GET /v1/tasks/{task_id}/stream` SSE 接口。
+HTTP 网关当前暴露 `/health`、`/agent/run`、`/agent/status`、`/agent/list`、`/tool/run`、用于任务级 SSE 遥测的 `GET /v1/tasks/{task_id}/stream`、用于动作实时 stdout/stderr 流的 `GET /v1/tasks/{task_id}/actions/{action_id}/stream`、用于任务审计记录查询的 `GET /v1/tasks/{task_id}/audit`，以及用于单个 action 审计记录查询的 `GET /v1/tasks/{task_id}/actions/{action_id}/audit`。
 
-如果要跑真实三进程验收（`controller + apiserver + worker`），可直接执行：
+现在任务遥测会包含实时 `task.action.output` chunk 事件；Native 与 Docker runtime 都支持增量流式输出。当 action 完成后，audit store 会持久化最终 command、exit code、worker id、stdout、stderr，因此动作流接口可以回放已完成动作的结果快照，audit 接口也能提供持久化执行记录。
+
+如果要跑真实三进程验收（`controller + apiserver + worker`，并验证 audit 闭环），可直接执行：
 
 ```bash
 ./scripts/acceptance.sh
@@ -197,6 +200,7 @@ agentos/
 |------|--------|--------|
 | `EventBus` | memory, nats | nats（生产）/ memory（开发） |
 | `TaskRepository` | memory, postgres | postgres（生产）/ memory（开发） |
+| `AuditLogStore` | memory, postgres | postgres（生产）/ memory（开发） |
 | `Planner` | prompt, openai (LLM) | 默认 prompt 回退；配置 LLM 后启用 OpenAI + retry/fallback 流水线 |
 | `Memory.Provider` | inmemory, redis | inmemory |
 | `RuntimeAdapter` (Rust) | native, docker | native |

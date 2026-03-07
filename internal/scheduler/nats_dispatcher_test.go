@@ -111,6 +111,48 @@ func TestNATSScheduler_DispatchesThroughDispatcher(t *testing.T) {
 	}
 }
 
+func TestNATSDispatcher_ForwardsStreamingChunks(t *testing.T) {
+	js := newFakeJetStream()
+	pool := &fakePool{selected: "worker-1"}
+	pool.executeStream = func(ctx context.Context, workerID, taskID string, action *taskdsl.Action, sink func(runtimeclient.StreamChunk)) (*runtimeclient.ExecutionResult, error) {
+		sink(runtimeclient.StreamChunk{TaskID: taskID, ActionID: action.ID, Kind: "stdout", Data: []byte("na")})
+		sink(runtimeclient.StreamChunk{TaskID: taskID, ActionID: action.ID, Kind: "stdout", Data: []byte("ts")})
+		return &runtimeclient.ExecutionResult{ExitCode: 0, Stdout: []byte("nats")}, nil
+	}
+
+	var streamed []runtimeclient.StreamChunk
+	dispatcher := NewNATSDispatcher(js, "TEST", pool).WithOutputHook(func(chunk runtimeclient.StreamChunk) {
+		streamed = append(streamed, chunk)
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := dispatcher.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer dispatcher.Close()
+
+	sched := NewNATSScheduler(js, "TEST")
+	defer sched.Close()
+
+	action := &taskdsl.Action{ID: "act-2", Kind: "command.exec", RuntimeEnv: "default", Payload: map[string]any{"cmd": "echo nats"}}
+	if err := sched.Submit(ctx, "task-2", action); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	select {
+	case <-sched.Results():
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for NATS result")
+	}
+
+	if len(streamed) != 2 {
+		t.Fatalf("expected 2 streamed chunks, got %d", len(streamed))
+	}
+	if string(streamed[0].Data)+string(streamed[1].Data) != "nats" {
+		t.Fatalf("unexpected streamed chunks: %+v", streamed)
+	}
+}
+
 func TestNATSScheduler_UsesConfiguredSubjectPrefix(t *testing.T) {
 	js := newFakeJetStream()
 	sched := NewNATSScheduler(js, "CUSTOM")

@@ -46,6 +46,30 @@ func (p *Pool) Execute(ctx context.Context, workerID, taskID string, action *tas
 	return client.ExecuteAction(ctx, taskID, action)
 }
 
+// ExecuteStream routes an action to a specific worker and forwards live output chunks when supported.
+func (p *Pool) ExecuteStream(ctx context.Context, workerID, taskID string, action *taskdsl.Action, sink func(runtimeclient.StreamChunk)) (*runtimeclient.ExecutionResult, error) {
+	client, err := p.getOrDial(ctx, workerID)
+	if err != nil {
+		return nil, err
+	}
+	if streamer, ok := client.(runtimeclient.StreamingExecutorClient); ok {
+		return streamer.ExecuteStream(ctx, taskID, action, sink)
+	}
+	result, err := client.ExecuteAction(ctx, taskID, action)
+	if err != nil {
+		return nil, err
+	}
+	if sink != nil && result != nil {
+		if len(result.Stdout) > 0 {
+			sink(runtimeclient.StreamChunk{TaskID: taskID, ActionID: action.ID, Kind: "stdout", Data: result.Stdout})
+		}
+		if len(result.Stderr) > 0 {
+			sink(runtimeclient.StreamChunk{TaskID: taskID, ActionID: action.ID, Kind: "stderr", Data: result.Stderr})
+		}
+	}
+	return result, nil
+}
+
 // SelectWorker picks the least-loaded available worker from the registry.
 func (p *Pool) SelectWorker(ctx context.Context) (string, error) {
 	available, err := p.registry.GetAvailable(ctx)

@@ -26,6 +26,7 @@ type EngineImpl struct {
 	scheduler     scheduler.Scheduler          // nil = use direct executor
 	memoryHook    *MemoryHook
 	vault         policy.CredentialVault
+	auditStore    persistence.AuditLogStore
 }
 
 // NewEngineImpl returns a new task engine.
@@ -48,9 +49,9 @@ func NewEngineImpl(
 		planner:       planner,
 		skillResolver: skillResolver,
 		executor:      executor,
-			policy:        pol,
-			scheduler:     sched,
-		}
+		policy:        pol,
+		scheduler:     sched,
+	}
 }
 
 // WithMemoryHook attaches a memory hook to the engine.
@@ -62,6 +63,12 @@ func (e *EngineImpl) WithMemoryHook(hook *MemoryHook) *EngineImpl {
 // WithVault attaches a credential vault to the engine.
 func (e *EngineImpl) WithVault(vault policy.CredentialVault) *EngineImpl {
 	e.vault = vault
+	return e
+}
+
+// WithAuditStore attaches an audit store to the engine.
+func (e *EngineImpl) WithAuditStore(store persistence.AuditLogStore) *EngineImpl {
+	e.auditStore = store
 	return e
 }
 
@@ -111,8 +118,8 @@ func (e *EngineImpl) StartTaskWithInput(ctx context.Context, input StartTaskInpu
 	}
 
 	for i := range plan.Actions {
-			action := &plan.Actions[i]
-			profile := action.RuntimeEnv
+		action := &plan.Actions[i]
+		profile := action.RuntimeEnv
 		if e.skillResolver != nil {
 			if p, err := e.skillResolver.Resolve(action); err == nil {
 				profile = p
@@ -120,16 +127,16 @@ func (e *EngineImpl) StartTaskWithInput(ctx context.Context, input StartTaskInpu
 		}
 		action.RuntimeEnv = profile
 
-			injectCredentialToken(ctx, e.vault, input.AgentName, action)
+		injectCredentialToken(ctx, e.vault, input.AgentName, action)
 
-			// Policy check: evaluate before dispatching each action.
-			if e.policy != nil {
-				decision, err := e.policy.Evaluate(ctx, policy.PolicyRequest{
-					AgentName: input.AgentName,
-					ToolName:  action.Kind,
-					Command:   extractCommand(action),
-					TenantID:  input.TenantID,
-				})
+		// Policy check: evaluate before dispatching each action.
+		if e.policy != nil {
+			decision, err := e.policy.Evaluate(ctx, policy.PolicyRequest{
+				AgentName: input.AgentName,
+				ToolName:  action.Kind,
+				Command:   extractCommand(action),
+				TenantID:  input.TenantID,
+			})
 			if err != nil {
 				_ = e.bus.Publish(ctx, "task.action.denied", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Occurred: time.Now()})
 				_ = e.transition(ctx, task, Failed)
@@ -200,7 +207,7 @@ func (e *EngineImpl) ProcessResults(ctx context.Context) {
 			if err != nil || task == nil {
 				continue
 			}
-			_ = e.bus.Publish(ctx, "task.action.completed", &events.ActionCompleted{
+			completed := &events.ActionCompleted{
 				TaskID:   result.TaskID,
 				ActionID: result.ActionID,
 				ExitCode: result.ExitCode,
@@ -208,7 +215,13 @@ func (e *EngineImpl) ProcessResults(ctx context.Context) {
 				Stderr:   string(result.Stderr),
 				WorkerID: result.WorkerID,
 				Occurred: time.Now(),
-			})
+			}
+			if result.Error != nil {
+				completed.Error = result.Error.Error()
+			}
+			_ = e.bus.Publish(ctx, "task.action.completed", completed)
+			action := findTaskAction(task, result.ActionID)
+			e.appendAudit(ctx, task, action, &result, completed.Error)
 			if result.ExitCode != 0 || result.Error != nil {
 				_ = e.transition(ctx, task, Failed)
 			} else {
@@ -266,15 +279,37 @@ func (e *EngineImpl) executeDirect(ctx context.Context, task *taskdsl.Task, acti
 			return task, err
 		}
 	}
-	result, err := e.executor.ExecuteAction(ctx, task.ID, action)
+	var (
+		result *runtimeclient.ExecutionResult
+		err    error
+	)
+	if streamer, ok := e.executor.(runtimeclient.StreamingExecutorClient); ok {
+		result, err = streamer.ExecuteStream(ctx, task.ID, action, func(chunk runtimeclient.StreamChunk) {
+			e.publishActionOutput(ctx, chunk)
+		})
+	} else {
+		result, err = e.executor.ExecuteAction(ctx, task.ID, action)
+		if err == nil && result != nil {
+			if len(result.Stdout) > 0 {
+				e.publishActionOutput(ctx, runtimeclient.StreamChunk{TaskID: task.ID, ActionID: action.ID, Kind: "stdout", Data: result.Stdout})
+			}
+			if len(result.Stderr) > 0 {
+				e.publishActionOutput(ctx, runtimeclient.StreamChunk{TaskID: task.ID, ActionID: action.ID, Kind: "stderr", Data: result.Stderr})
+			}
+		}
+	}
 	if err != nil {
-		_ = e.bus.Publish(ctx, "task.action.completed", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Error: err.Error(), Occurred: time.Now()})
+		completed := &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Error: err.Error(), Occurred: time.Now()}
+		_ = e.bus.Publish(ctx, "task.action.completed", completed)
+		e.appendAudit(ctx, task, action, &scheduler.ActionResult{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Error: err}, err.Error())
 		if err := e.transition(ctx, task, Failed); err != nil {
 			return task, err
 		}
 		return e.repo.Get(ctx, task.ID)
 	}
-	_ = e.bus.Publish(ctx, "task.action.completed", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: result.ExitCode, Stdout: string(result.Stdout), Stderr: string(result.Stderr), Occurred: time.Now()})
+	completed := &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: result.ExitCode, Stdout: string(result.Stdout), Stderr: string(result.Stderr), Occurred: time.Now()}
+	_ = e.bus.Publish(ctx, "task.action.completed", completed)
+	e.appendAudit(ctx, task, action, &scheduler.ActionResult{TaskID: task.ID, ActionID: action.ID, ExitCode: result.ExitCode, Stdout: result.Stdout, Stderr: result.Stderr}, "")
 	if err := e.transition(ctx, task, Evaluating); err != nil {
 		return task, err
 	}
@@ -304,6 +339,57 @@ func (e *EngineImpl) executeDirect(ctx context.Context, task *taskdsl.Task, acti
 		})
 	}
 	return e.repo.Get(ctx, task.ID)
+}
+
+func (e *EngineImpl) publishActionOutput(ctx context.Context, chunk runtimeclient.StreamChunk) {
+	if e.bus == nil {
+		return
+	}
+	_ = e.bus.Publish(ctx, "task.action.output", &events.ActionOutputChunk{
+		TaskID:   chunk.TaskID,
+		ActionID: chunk.ActionID,
+		Kind:     chunk.Kind,
+		Data:     append([]byte(nil), chunk.Data...),
+		Text:     string(chunk.Data),
+		Occurred: time.Now(),
+	})
+}
+
+func (e *EngineImpl) appendAudit(ctx context.Context, task *taskdsl.Task, action *taskdsl.Action, result *scheduler.ActionResult, errorText string) {
+	if e.auditStore == nil || task == nil || result == nil {
+		return
+	}
+	command := ""
+	runtimeEnv := ""
+	if action != nil {
+		command = extractCommand(action)
+		runtimeEnv = action.RuntimeEnv
+	}
+	_ = e.auditStore.Append(ctx, persistence.AuditRecord{
+		TaskID:      task.ID,
+		ActionID:    result.ActionID,
+		Command:     command,
+		RuntimeEnv:  runtimeEnv,
+		WorkerID:    result.WorkerID,
+		ExitCode:    result.ExitCode,
+		Stdout:      string(result.Stdout),
+		Stderr:      string(result.Stderr),
+		Error:       errorText,
+		SideEffects: nil,
+		OccurredAt:  time.Now(),
+	})
+}
+
+func findTaskAction(task *taskdsl.Task, actionID string) *taskdsl.Action {
+	if task == nil || task.Plan == nil {
+		return nil
+	}
+	for i := range task.Plan.Actions {
+		if task.Plan.Actions[i].ID == actionID {
+			return &task.Plan.Actions[i]
+		}
+	}
+	return nil
 }
 
 func augmentPlanningPrompt(prompt string, recalled []memory.SearchResult) string {
@@ -338,7 +424,7 @@ func injectCredentialToken(ctx context.Context, vault policy.CredentialVault, ag
 
 // extractCommand pulls a command string from the action payload for policy evaluation.
 func extractCommand(action *taskdsl.Action) string {
-	if action.Payload == nil {
+	if action == nil || action.Payload == nil {
 		return ""
 	}
 	if cmd, ok := action.Payload["cmd"]; ok {

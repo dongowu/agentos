@@ -48,7 +48,7 @@ func main() {
 	gw.AgentManager = agentLookupAdapter{mgr: app.AgentManager}
 
 	addr := apiListenAddr()
-	srv := &http.Server{Addr: addr, API: api, Bus: app.Bus, Gateway: gw}
+	srv := &http.Server{Addr: addr, API: api, Audit: app.Audit, Bus: app.Bus, Gateway: gw}
 	log.Printf("apiserver listening on %s", addr)
 	if err := srv.Start(); err != nil {
 		log.Fatal(err)

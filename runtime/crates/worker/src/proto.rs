@@ -289,9 +289,7 @@ pub mod runtime_service_server {
                 "/agentos.v1.RuntimeService/ExecuteAction" => {
                     struct ExecuteActionSvc<T: RuntimeService>(pub std::sync::Arc<T>);
 
-                    impl<T: RuntimeService> tonic::server::UnaryService<ExecuteActionRequest>
-                        for ExecuteActionSvc<T>
-                    {
+                    impl<T: RuntimeService> tonic::server::UnaryService<ExecuteActionRequest> for ExecuteActionSvc<T> {
                         type Response = ExecuteActionResponse;
                         type Future = std::pin::Pin<
                             Box<
@@ -323,7 +321,8 @@ pub mod runtime_service_server {
                 "/agentos.v1.RuntimeService/StreamOutput" => {
                     struct StreamOutputSvc<T: RuntimeService>(pub std::sync::Arc<T>);
 
-                    impl<T: RuntimeService> tonic::server::ServerStreamingService<StreamOutputRequest>
+                    impl<T: RuntimeService>
+                        tonic::server::ServerStreamingService<StreamOutputRequest>
                         for StreamOutputSvc<T>
                     {
                         type Response = StreamChunk;

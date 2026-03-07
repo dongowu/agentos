@@ -68,6 +68,7 @@ Current Agent frameworks (LangChain, AutoGPT, CrewAI) are application-layer glue
 | **Policy Engine** | Allow/deny rules, autonomy levels, credential isolation | Implemented |
 | **Runtime** | Rust Worker, NativeRuntime, DockerRuntime, SecurityPolicy | Implemented |
 | **Scheduler** | Worker registry, health monitor, NATS queue, worker pool | Implemented |
+| **Audit** | Platform audit store with persistent task/action records | Implemented |
 | **Memory** | In-memory + Redis providers, TTL support | Implemented |
 
 ## Quick Start
@@ -97,9 +98,11 @@ export AGENTOS_MODE=dev \
 go run ./cmd/osctl submit "create a hello world python script"
 ```
 
-The HTTP gateway exposes `/health`, `/agent/run`, `/agent/status`, `/agent/list`, `/tool/run`, and `GET /v1/tasks/{task_id}/stream` for SSE task telemetry.
+The HTTP gateway exposes `/health`, `/agent/run`, `/agent/status`, `/agent/list`, `/tool/run`, `GET /v1/tasks/{task_id}/stream` for task-level SSE telemetry, `GET /v1/tasks/{task_id}/actions/{action_id}/stream` for live action stdout/stderr streaming, `GET /v1/tasks/{task_id}/audit` for task audit history, and `GET /v1/tasks/{task_id}/actions/{action_id}/audit` for a single persisted action audit record.
 
-For a real three-process acceptance run (`controller + apiserver + worker`), use:
+Task telemetry now includes live `task.action.output` chunk events. Native and Docker runtimes both support incremental stream delivery. Once an action finishes, the audit store persists the final command, exit code, worker id, stdout, and stderr so the action stream can replay a completed run snapshot and the audit endpoints can serve durable execution records.
+
+For a real three-process acceptance run (`controller + apiserver + worker`) including audit verification, use:
 
 ```bash
 ./scripts/acceptance.sh
@@ -195,6 +198,7 @@ agentos/
 |-----------|----------|---------|
 | `EventBus` | memory, nats | nats (prod) / memory (dev) |
 | `TaskRepository` | memory, postgres | postgres (prod) / memory (dev) |
+| `AuditLogStore` | memory, postgres | postgres (prod) / memory (dev) |
 | `Planner` | prompt, openai (LLM) | prompt fallback; OpenAI + retry/fallback when configured |
 | `Memory.Provider` | inmemory, redis | inmemory |
 | `RuntimeAdapter` (Rust) | native, docker | native |

@@ -15,13 +15,14 @@ import (
 // --- fakes for local scheduler tests ---
 
 type fakePool struct {
-	mu       sync.Mutex
-	execLog  []execCall
-	result   *runtimeclient.ExecutionResult
-	err      error
-	selected string // next SelectWorker return
-	selErr   error
-	execute  func(ctx context.Context, workerID, taskID string, action *taskdsl.Action) (*runtimeclient.ExecutionResult, error)
+	mu            sync.Mutex
+	execLog       []execCall
+	result        *runtimeclient.ExecutionResult
+	err           error
+	selected      string // next SelectWorker return
+	selErr        error
+	execute       func(ctx context.Context, workerID, taskID string, action *taskdsl.Action) (*runtimeclient.ExecutionResult, error)
+	executeStream func(ctx context.Context, workerID, taskID string, action *taskdsl.Action, sink func(runtimeclient.StreamChunk)) (*runtimeclient.ExecutionResult, error)
 }
 
 type execCall struct {
@@ -42,6 +43,22 @@ func (p *fakePool) Execute(ctx context.Context, workerID, taskID string, action 
 	defer p.mu.Unlock()
 	p.execLog = append(p.execLog, execCall{workerID: workerID, taskID: taskID, actionID: action.ID})
 	return p.result, p.err
+}
+
+func (p *fakePool) ExecuteStream(ctx context.Context, workerID, taskID string, action *taskdsl.Action, sink func(runtimeclient.StreamChunk)) (*runtimeclient.ExecutionResult, error) {
+	if p.executeStream != nil {
+		return p.executeStream(ctx, workerID, taskID, action, sink)
+	}
+	result, err := p.Execute(ctx, workerID, taskID, action)
+	if sink != nil && result != nil {
+		if len(result.Stdout) > 0 {
+			sink(runtimeclient.StreamChunk{TaskID: taskID, ActionID: action.ID, Kind: "stdout", Data: result.Stdout})
+		}
+		if len(result.Stderr) > 0 {
+			sink(runtimeclient.StreamChunk{TaskID: taskID, ActionID: action.ID, Kind: "stderr", Data: result.Stderr})
+		}
+	}
+	return result, err
 }
 
 func (p *fakePool) getExecLog() []execCall {
@@ -173,6 +190,40 @@ func TestLocalScheduler_DetachesDispatchFromCallerCancellation(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for result")
+	}
+}
+
+func TestLocalScheduler_ForwardsStreamingChunks(t *testing.T) {
+	pool := &fakePool{selected: "w-1"}
+	pool.executeStream = func(ctx context.Context, workerID, taskID string, action *taskdsl.Action, sink func(runtimeclient.StreamChunk)) (*runtimeclient.ExecutionResult, error) {
+		sink(runtimeclient.StreamChunk{TaskID: taskID, ActionID: action.ID, Kind: "stdout", Data: []byte("hel")})
+		sink(runtimeclient.StreamChunk{TaskID: taskID, ActionID: action.ID, Kind: "stdout", Data: []byte("lo")})
+		return &runtimeclient.ExecutionResult{ExitCode: 0, Stdout: []byte("hello")}, nil
+	}
+
+	var streamed []runtimeclient.StreamChunk
+	sched := NewLocalScheduler(pool).WithOutputHook(func(chunk runtimeclient.StreamChunk) {
+		streamed = append(streamed, chunk)
+	})
+
+	if err := sched.Submit(context.Background(), "task-1", &taskdsl.Action{ID: "act-1", Kind: "command.exec"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	select {
+	case result := <-sched.Results():
+		if result.ExitCode != 0 {
+			t.Fatalf("expected exit code 0, got %d", result.ExitCode)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for result")
+	}
+
+	if len(streamed) != 2 {
+		t.Fatalf("expected 2 streamed chunks, got %d", len(streamed))
+	}
+	if string(streamed[0].Data) != "hel" || string(streamed[1].Data) != "lo" {
+		t.Fatalf("unexpected streamed chunks: %+v", streamed)
 	}
 }
 

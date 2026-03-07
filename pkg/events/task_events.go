@@ -23,6 +23,16 @@ type ActionDispatched struct {
 	Occurred time.Time `json:"occurred"`
 }
 
+// ActionOutputChunk is emitted while an action is still running.
+type ActionOutputChunk struct {
+	TaskID   string    `json:"task_id"`
+	ActionID string    `json:"action_id"`
+	Kind     string    `json:"kind"`
+	Data     []byte    `json:"data,omitempty"`
+	Text     string    `json:"text,omitempty"`
+	Occurred time.Time `json:"occurred"`
+}
+
 // ActionCompleted is emitted when a worker returns a result.
 type ActionCompleted struct {
 	TaskID   string    `json:"task_id"`

@@ -14,11 +14,16 @@ type WorkerPool interface {
 	Execute(ctx context.Context, workerID, taskID string, action *taskdsl.Action) (*runtimeclient.ExecutionResult, error)
 }
 
+type streamingWorkerPool interface {
+	ExecuteStream(ctx context.Context, workerID, taskID string, action *taskdsl.Action, sink func(runtimeclient.StreamChunk)) (*runtimeclient.ExecutionResult, error)
+}
+
 // LocalScheduler dispatches actions directly to workers via the pool.
 // Intended for dev mode when NATS is not available.
 type LocalScheduler struct {
-	pool    WorkerPool
-	results chan ActionResult
+	pool       WorkerPool
+	results    chan ActionResult
+	outputHook func(runtimeclient.StreamChunk)
 }
 
 // NewLocalScheduler creates a scheduler that dispatches via the worker pool.
@@ -27,6 +32,12 @@ func NewLocalScheduler(pool WorkerPool) *LocalScheduler {
 		pool:    pool,
 		results: make(chan ActionResult, 64),
 	}
+}
+
+// WithOutputHook attaches a callback that receives stdout/stderr chunks as they arrive.
+func (s *LocalScheduler) WithOutputHook(hook func(runtimeclient.StreamChunk)) *LocalScheduler {
+	s.outputHook = hook
+	return s
 }
 
 // Submit selects the least-loaded worker and dispatches the action.
@@ -43,7 +54,23 @@ func (s *LocalScheduler) Submit(ctx context.Context, taskID string, action *task
 }
 
 func (s *LocalScheduler) dispatch(ctx context.Context, workerID, taskID string, action *taskdsl.Action) {
-	result, err := s.pool.Execute(ctx, workerID, taskID, action)
+	var (
+		result *runtimeclient.ExecutionResult
+		err    error
+	)
+	if streamer, ok := s.pool.(streamingWorkerPool); ok {
+		result, err = streamer.ExecuteStream(ctx, workerID, taskID, action, s.outputHook)
+	} else {
+		result, err = s.pool.Execute(ctx, workerID, taskID, action)
+		if s.outputHook != nil && result != nil {
+			if len(result.Stdout) > 0 {
+				s.outputHook(runtimeclient.StreamChunk{TaskID: taskID, ActionID: action.ID, Kind: "stdout", Data: result.Stdout})
+			}
+			if len(result.Stderr) > 0 {
+				s.outputHook(runtimeclient.StreamChunk{TaskID: taskID, ActionID: action.ID, Kind: "stderr", Data: result.Stderr})
+			}
+		}
+	}
 	if err != nil {
 		log.Printf("scheduler dispatch failed task=%s action=%s worker=%s: %v", taskID, action.ID, workerID, err)
 	}

@@ -10,6 +10,7 @@ pub mod native;
 pub mod security;
 
 use async_trait::async_trait;
+use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -146,6 +147,9 @@ mod tests {
 /// enforcement, output truncation, and secret redaction.
 #[async_trait]
 pub trait RuntimeAdapter: Send + Sync {
+    /// Type-erased access for downcasting in transport adapters.
+    fn as_any(&self) -> &dyn Any;
+
     /// Human-readable name for this runtime (e.g. "native", "docker").
     fn name(&self) -> &str;
 
