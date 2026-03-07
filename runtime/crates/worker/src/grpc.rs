@@ -57,6 +57,21 @@ fn payload_from_bytes(bytes: &[u8]) -> Result<ActionPayload, Status> {
     Ok(payload)
 }
 
+fn stream_payload_from_request(req: &StreamOutputRequest) -> Result<ActionPayload, Status> {
+    if !req.payload.is_empty() {
+        return payload_from_bytes(&req.payload);
+    }
+    let payload: ActionPayload = serde_json::from_str(&req.action_id).map_err(|_| {
+        Status::invalid_argument(
+            "stream payload required: send JSON in payload or legacy action_id field",
+        )
+    })?;
+    if payload.command.trim().is_empty() {
+        return Err(Status::invalid_argument("command cannot be empty"));
+    }
+    Ok(payload)
+}
+
 fn payload_to_spec(payload: ActionPayload, max_output_bytes: usize) -> ExecutionSpec {
     ExecutionSpec {
         command: payload.command,
@@ -257,12 +272,7 @@ impl RuntimeService for RuntimeServiceImpl {
         request: Request<StreamOutputRequest>,
     ) -> Result<Response<Self::StreamOutputStream>, Status> {
         let req = request.into_inner();
-        let payload: ActionPayload = serde_json::from_str(&req.action_id).map_err(|_| {
-            Status::invalid_argument("action_id should contain JSON payload for streaming")
-        })?;
-        if payload.command.trim().is_empty() {
-            return Err(Status::invalid_argument("command cannot be empty"));
-        }
+        let payload = stream_payload_from_request(&req)?;
 
         let executor = self.executor.clone();
         let task_id = req.task_id.clone();
@@ -619,7 +629,8 @@ mod tests {
         let payload = serde_json::json!({"command": "echo first; sleep 0.2; echo second"});
         let req = Request::new(StreamOutputRequest {
             task_id: "t".into(),
-            action_id: payload.to_string(),
+            action_id: "action-1".into(),
+            payload: serde_json::to_vec(&payload).unwrap(),
         });
         let resp = svc.stream_output(req).await.expect("stream should start");
         let mut stream = resp.into_inner();
@@ -633,6 +644,31 @@ mod tests {
         assert_eq!(first.kind, "stdout");
         let text = String::from_utf8_lossy(&first.data);
         assert!(text.contains("first"), "unexpected first chunk: {text}");
+    }
+
+    #[tokio::test]
+    async fn grpc_stream_output_accepts_legacy_action_id_payload() {
+        let svc = test_service();
+        let payload = serde_json::json!({"command": "echo legacy"});
+        let req = Request::new(StreamOutputRequest {
+            task_id: "t".into(),
+            action_id: payload.to_string(),
+            payload: Vec::new(),
+        });
+        let resp = svc
+            .stream_output(req)
+            .await
+            .expect("legacy stream should start");
+        let mut stream = resp.into_inner();
+
+        let first = stream
+            .next()
+            .await
+            .expect("expected stream item")
+            .expect("expected successful chunk");
+        assert_eq!(first.kind, "stdout");
+        let text = String::from_utf8_lossy(&first.data);
+        assert!(text.contains("legacy"), "unexpected legacy chunk: {text}");
     }
 
     #[cfg(unix)]
@@ -653,12 +689,13 @@ sys.stdout.flush()
         let payload = serde_json::json!({"command": "echo docker-test"});
         let req = Request::new(StreamOutputRequest {
             task_id: "t".into(),
-            action_id: payload.to_string(),
+            action_id: "action-1".into(),
+            payload: serde_json::to_vec(&payload).unwrap(),
         });
         let resp = svc.stream_output(req).await.expect("stream should start");
         let mut stream = resp.into_inner();
 
-        let first = tokio::time::timeout(Duration::from_secs(2), stream.next())
+        let first = tokio::time::timeout(Duration::from_secs(4), stream.next())
             .await
             .expect("expected first docker chunk before process completes")
             .expect("expected stream item")

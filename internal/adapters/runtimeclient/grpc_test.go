@@ -6,6 +6,9 @@ import (
 	"io"
 	"testing"
 
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
+
 	v1 "github.com/dongowu/agentos/api/gen/agentos/v1"
 	intruntime "github.com/dongowu/agentos/internal/runtimeclient"
 	"github.com/dongowu/agentos/pkg/taskdsl"
@@ -123,3 +126,63 @@ func TestGRPCExecutorClient_ExecuteStream_UsesPayloadAndAggregatesChunks(t *test
 
 var _ intruntime.ExecutorClient = (*GRPCExecutorClient)(nil)
 var _ intruntime.StreamingExecutorClient = (*GRPCExecutorClient)(nil)
+
+func TestBuildStreamOutputRequestMessage_UsesActionIDAndPayloadField(t *testing.T) {
+	msg, err := buildStreamOutputRequestMessage("task-1", "action-1", []byte(`{"command":"echo hello"}`))
+	if err != nil {
+		t.Fatalf("buildStreamOutputRequestMessage: %v", err)
+	}
+	wire, err := proto.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal stream request: %v", err)
+	}
+
+	var taskID, actionID string
+	var payload []byte
+	for len(wire) > 0 {
+		num, typ, n := protowire.ConsumeTag(wire)
+		if n < 0 {
+			t.Fatalf("consume tag: %v", protowire.ParseError(n))
+		}
+		wire = wire[n:]
+		switch num {
+		case 1:
+			value, m := protowire.ConsumeBytes(wire)
+			if m < 0 {
+				t.Fatalf("consume task_id: %v", protowire.ParseError(m))
+			}
+			taskID = string(value)
+			wire = wire[m:]
+		case 2:
+			value, m := protowire.ConsumeBytes(wire)
+			if m < 0 {
+				t.Fatalf("consume action_id: %v", protowire.ParseError(m))
+			}
+			actionID = string(value)
+			wire = wire[m:]
+		case 3:
+			value, m := protowire.ConsumeBytes(wire)
+			if m < 0 {
+				t.Fatalf("consume payload: %v", protowire.ParseError(m))
+			}
+			payload = append([]byte(nil), value...)
+			wire = wire[m:]
+		default:
+			m := protowire.ConsumeFieldValue(num, typ, wire)
+			if m < 0 {
+				t.Fatalf("consume field %d: %v", num, protowire.ParseError(m))
+			}
+			wire = wire[m:]
+		}
+	}
+
+	if taskID != "task-1" {
+		t.Fatalf("expected task-1, got %q", taskID)
+	}
+	if actionID != "action-1" {
+		t.Fatalf("expected action-1, got %q", actionID)
+	}
+	if string(payload) != `{"command":"echo hello"}` {
+		t.Fatalf("expected payload JSON, got %q", payload)
+	}
+}

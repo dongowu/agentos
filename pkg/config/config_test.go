@@ -41,3 +41,24 @@ func TestApplyEnvOverrides_SchedulerMode(t *testing.T) {
 		t.Fatalf("expected scheduler mode nats, got %q", cfg.Scheduler.Mode)
 	}
 }
+
+func TestApplyEnvOverrides_AuthTokens(t *testing.T) {
+	t.Setenv("AGENTOS_AUTH_TOKENS", "token-a=user-a|tenant-a|admin;writer,token-b=user-b|tenant-b")
+
+	cfg := ApplyEnvOverrides(Config{})
+	if len(cfg.Auth.Tokens) != 2 {
+		t.Fatalf("expected 2 auth tokens, got %d", len(cfg.Auth.Tokens))
+	}
+	if cfg.Auth.Tokens["token-a"].Subject != "user-a" {
+		t.Fatalf("expected subject user-a, got %q", cfg.Auth.Tokens["token-a"].Subject)
+	}
+	if cfg.Auth.Tokens["token-a"].TenantID != "tenant-a" {
+		t.Fatalf("expected tenant tenant-a, got %q", cfg.Auth.Tokens["token-a"].TenantID)
+	}
+	if len(cfg.Auth.Tokens["token-a"].Roles) != 2 {
+		t.Fatalf("expected 2 roles, got %d", len(cfg.Auth.Tokens["token-a"].Roles))
+	}
+	if cfg.Auth.Tokens["token-b"].TenantID != "tenant-b" {
+		t.Fatalf("expected tenant tenant-b, got %q", cfg.Auth.Tokens["token-b"].TenantID)
+	}
+}

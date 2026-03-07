@@ -27,3 +27,12 @@ func TestPlannerFromConfig_UnsupportedProviderFallsBackToPrompt(t *testing.T) {
 		t.Fatalf("expected PromptPlanner for unsupported provider, got %T", planner)
 	}
 }
+
+func TestAuthProviderFromConfig_UsesStaticBearerTokens(t *testing.T) {
+	provider := authProviderFromConfig(config.Config{Auth: config.AuthConfig{Tokens: map[string]config.AuthPrincipalConfig{
+		"token-a": {Subject: "user-a", TenantID: "tenant-a", Roles: []string{"admin"}},
+	}}})
+	if provider == nil {
+		t.Fatal("expected auth provider, got nil")
+	}
+}

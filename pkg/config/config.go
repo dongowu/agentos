@@ -15,6 +15,7 @@ type Config struct {
 	Policy      PolicyConfig      `yaml:"policy"`
 	Scheduler   SchedulerConfig   `yaml:"scheduler"`
 	Vault       VaultConfig       `yaml:"vault"`
+	Auth        AuthConfig        `yaml:"auth"`
 	AgentDir    string            `yaml:"agent_dir"`
 }
 
@@ -38,6 +39,18 @@ type PolicyRuleConfig struct {
 	Agent string   `yaml:"agent"`
 	Allow []string `yaml:"allow"`
 	Deny  []string `yaml:"deny"`
+}
+
+// AuthConfig configures caller authentication for HTTP task APIs.
+type AuthConfig struct {
+	Tokens map[string]AuthPrincipalConfig `yaml:"tokens"`
+}
+
+// AuthPrincipalConfig binds a bearer token to a subject and tenant.
+type AuthPrincipalConfig struct {
+	Subject  string   `yaml:"subject"`
+	TenantID string   `yaml:"tenant_id"`
+	Roles    []string `yaml:"roles"`
 }
 
 // VaultConfig configures opaque agent credential tokens.
@@ -112,6 +125,7 @@ func Default() Config {
 		Policy:    PolicyConfig{DefaultAutonomy: "supervised"},
 		Scheduler: SchedulerConfig{Mode: "nats", HeartbeatTimeout: "30s", HealthCheckInterval: "10s"},
 		Vault:     VaultConfig{AgentSecrets: map[string]string{}},
+		Auth:      AuthConfig{Tokens: map[string]AuthPrincipalConfig{}},
 	}
 }
 
@@ -140,6 +154,7 @@ func Dev() Config {
 		Policy:      PolicyConfig{DefaultAutonomy: "autonomous"},
 		Scheduler:   SchedulerConfig{Mode: "local", HeartbeatTimeout: "30s", HealthCheckInterval: "10s"},
 		Vault:       VaultConfig{AgentSecrets: map[string]string{}},
+		Auth:        AuthConfig{Tokens: map[string]AuthPrincipalConfig{}},
 	})
 }
 
@@ -172,6 +187,9 @@ func ApplyEnvOverrides(cfg Config) Config {
 	if rawSecrets := os.Getenv("AGENTOS_AGENT_SECRETS"); rawSecrets != "" {
 		cfg.Vault.AgentSecrets = parseAgentSecrets(rawSecrets)
 	}
+	if rawTokens := os.Getenv("AGENTOS_AUTH_TOKENS"); rawTokens != "" {
+		cfg.Auth.Tokens = parseAuthTokens(rawTokens)
+	}
 	return cfg
 }
 
@@ -194,4 +212,42 @@ func parseAgentSecrets(raw string) map[string]string {
 		secrets[agent] = secret
 	}
 	return secrets
+}
+
+func parseAuthTokens(raw string) map[string]AuthPrincipalConfig {
+	tokens := map[string]AuthPrincipalConfig{}
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		token, payload, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		token = strings.TrimSpace(token)
+		payload = strings.TrimSpace(payload)
+		if token == "" || payload == "" {
+			continue
+		}
+		parts := strings.SplitN(payload, "|", 3)
+		principal := AuthPrincipalConfig{}
+		principal.Subject = strings.TrimSpace(parts[0])
+		if len(parts) > 1 {
+			principal.TenantID = strings.TrimSpace(parts[1])
+		}
+		if len(parts) > 2 {
+			for _, role := range strings.Split(parts[2], ";") {
+				role = strings.TrimSpace(role)
+				if role != "" {
+					principal.Roles = append(principal.Roles, role)
+				}
+			}
+		}
+		if principal.Subject == "" {
+			continue
+		}
+		tokens[token] = principal
+	}
+	return tokens
 }

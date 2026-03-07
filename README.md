@@ -277,6 +277,7 @@ app, err := bootstrap.FromEnv(ctx)
 | `AGENTOS_DOCKER_IMAGE` | Docker image for container sandbox | ubuntu:22.04 |
 | `AGENTOS_MAX_CONCURRENT_TASKS` | Worker concurrency limit | 4 |
 | `AGENTOS_AGENT_SECRETS` | Agent secret map (`agent=secret,agent2=secret2`) for opaque token injection | — |
+| `AGENTOS_AUTH_TOKENS` | Bearer auth map (`token=subject|tenant|role1;role2`) for `/v1/tasks*` endpoints | — |
 
 ## Test Suite
 

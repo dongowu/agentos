@@ -20,6 +20,7 @@ type Server struct {
 	API     access.TaskSubmissionAPI
 	Audit   persistence.AuditLogStore
 	Bus     messaging.EventBus
+	Auth    access.AuthProvider
 	Gateway *gateway.Handler
 	srv     *http.Server
 }
@@ -61,6 +62,11 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	ctx, _, ok := s.authenticateRequest(w, r)
+	if !ok {
+		return
+	}
+	r = r.WithContext(ctx)
 	switch r.Method {
 	case http.MethodPost:
 		s.handleCreateTask(w, r)
@@ -74,6 +80,11 @@ func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	ctx, _, ok := s.authenticateRequest(w, r)
+	if !ok {
+		return
+	}
+	r = r.WithContext(ctx)
 	path := strings.TrimPrefix(r.URL.Path, "/v1/tasks/")
 	if path == "" {
 		http.Error(w, `{"error":"task id required"}`, http.StatusBadRequest)
@@ -161,6 +172,14 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if req.Prompt == "" {
 		http.Error(w, `{"error":"prompt required"}`, http.StatusBadRequest)
 		return
+	}
+	if principal, ok := access.PrincipalFromContext(r.Context()); ok {
+		if req.TenantID == "" {
+			req.TenantID = principal.TenantID
+		} else if principal.TenantID != "" && req.TenantID != principal.TenantID {
+			http.Error(w, `{"error":"tenant mismatch"}`, http.StatusForbidden)
+			return
+		}
 	}
 	resp, err := s.API.CreateTask(r.Context(), access.CreateTaskRequest{Prompt: req.Prompt, TenantID: req.TenantID, AgentName: req.AgentName})
 	if err != nil {
@@ -404,6 +423,39 @@ func (s *Server) handleActionStream(w http.ResponseWriter, r *http.Request, task
 			return
 		}
 	}
+}
+
+func (s *Server) authenticateRequest(w http.ResponseWriter, r *http.Request) (context.Context, *access.Principal, bool) {
+	if s.Auth == nil {
+		return r.Context(), nil, true
+	}
+	token, ok := bearerToken(r.Header.Get("Authorization"))
+	if !ok {
+		http.Error(w, `{"error":"missing bearer token"}`, http.StatusUnauthorized)
+		return nil, nil, false
+	}
+	principal, err := s.Auth.Authenticate(r.Context(), token)
+	if err != nil {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return nil, nil, false
+	}
+	ctx := access.WithPrincipal(r.Context(), principal)
+	return ctx, principal, true
+}
+
+func bearerToken(header string) (string, bool) {
+	if header == "" {
+		return "", false
+	}
+	parts := strings.SplitN(header, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return "", false
+	}
+	token := strings.TrimSpace(parts[1])
+	if token == "" {
+		return "", false
+	}
+	return token, true
 }
 
 func writeSSEEvent(w http.ResponseWriter, name string, payload any) error {

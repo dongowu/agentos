@@ -278,6 +278,7 @@ app, err := bootstrap.FromEnv(ctx)
 | `AGENTOS_DOCKER_IMAGE` | Docker 沙箱镜像 | ubuntu:22.04 |
 | `AGENTOS_MAX_CONCURRENT_TASKS` | Worker 并发上限 | 4 |
 | `AGENTOS_AGENT_SECRETS` | Agent 密钥映射（`agent=secret,agent2=secret2`），用于注入不透明 token | — |
+| `AGENTOS_AUTH_TOKENS` | Bearer 鉴权映射（`token=subject|tenant|role1;role2`），保护 `/v1/tasks*` 接口 | — |
 
 ## 测试
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/dongowu/agentos/internal/access"
 	"github.com/dongowu/agentos/internal/adapter"
 	"github.com/dongowu/agentos/internal/adapters/llm"
 	"github.com/dongowu/agentos/internal/adapters/llm/openai"
@@ -42,6 +43,7 @@ type App struct {
 	AgentManager   *agent.Manager
 	Policy         policy.PolicyEngine
 	Vault          policy.CredentialVault
+	Auth           access.AuthProvider
 	WorkerRegistry worker.Registry
 	Scheduler      scheduler.Scheduler
 	closers        []io.Closer
@@ -64,6 +66,21 @@ func llmProviderFromConfig(cfg config.Config) (llm.Provider, string) {
 		model = "gpt-4o"
 	}
 	return openai.NewClient(baseURL, cfg.LLM.APIKey), model
+}
+
+func authProviderFromConfig(cfg config.Config) access.AuthProvider {
+	if len(cfg.Auth.Tokens) == 0 {
+		return nil
+	}
+	tokens := make(map[string]access.Principal, len(cfg.Auth.Tokens))
+	for token, principal := range cfg.Auth.Tokens {
+		tokens[token] = access.Principal{
+			Subject:  principal.Subject,
+			TenantID: principal.TenantID,
+			Roles:    append([]string(nil), principal.Roles...),
+		}
+	}
+	return access.NewStaticBearerAuthProvider(tokens)
 }
 
 func plannerFromConfig(cfg config.Config) orchestration.Planner {
@@ -170,6 +187,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	})
 
 	vault := policy.NewInMemoryVault(cfg.Vault.AgentSecrets)
+	authProvider := authProviderFromConfig(cfg)
 
 	heartbeatTimeout := durationOrDefault(cfg.Scheduler.HeartbeatTimeout, 30*time.Second)
 	var closers []io.Closer
@@ -225,6 +243,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		AgentManager:   agentMgr,
 		Policy:         policyEngine,
 		Vault:          vault,
+		Auth:           authProvider,
 		WorkerRegistry: workerReg,
 		Scheduler:      sched,
 		closers:        closers,

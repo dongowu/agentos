@@ -35,6 +35,8 @@ func TestRuntimeProto_DefinesExecuteContracts(t *testing.T) {
 		"service RuntimeService",
 		"message ExecuteActionRequest",
 		"message ExecuteActionResponse",
+		"message StreamOutputRequest",
+		"bytes payload = 3;",
 		"message StreamChunk",
 	} {
 		if !strings.Contains(content, token) {

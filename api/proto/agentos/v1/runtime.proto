@@ -25,6 +25,7 @@ message ExecuteActionResponse {
 message StreamOutputRequest {
   string task_id = 1;
   string action_id = 2;
+  bytes payload = 3;
 }
 
 message StreamChunk {

@@ -6,12 +6,18 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"sync"
 
 	v1 "github.com/dongowu/agentos/api/gen/agentos/v1"
 	"github.com/dongowu/agentos/internal/runtimeclient"
 	"github.com/dongowu/agentos/pkg/taskdsl"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/dynamicpb"
 )
 
 func normalizeActionPayload(payload map[string]any) map[string]any {
@@ -28,6 +34,85 @@ func normalizeActionPayload(payload map[string]any) map[string]any {
 		}
 	}
 	return normalized
+}
+
+// buildStreamOutputRequestMessage uses a dynamic descriptor so streaming can send the
+// new payload field before checked-in Go protobuf stubs are regenerated.
+var (
+	streamOutputRequestDescOnce sync.Once
+	streamOutputRequestDesc     protoreflect.MessageDescriptor
+	streamOutputRequestDescErr  error
+)
+
+func strPtr(value string) *string { return &value }
+func int32Ptr(value int32) *int32 { return &value }
+
+func streamOutputRequestDescriptor() (protoreflect.MessageDescriptor, error) {
+	streamOutputRequestDescOnce.Do(func() {
+		fileProto := protodesc.ToFileDescriptorProto(v1.File_agentos_v1_runtime_proto)
+		for _, message := range fileProto.GetMessageType() {
+			if message.GetName() != "StreamOutputRequest" {
+				continue
+			}
+			hasPayload := false
+			for _, field := range message.GetField() {
+				if field.GetName() == "payload" || field.GetNumber() == 3 {
+					hasPayload = true
+					break
+				}
+			}
+			if !hasPayload {
+				message.Field = append(message.Field, &descriptorpb.FieldDescriptorProto{
+					Name:     strPtr("payload"),
+					JsonName: strPtr("payload"),
+					Number:   int32Ptr(3),
+					Label:    descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
+					Type:     descriptorpb.FieldDescriptorProto_TYPE_BYTES.Enum(),
+				})
+			}
+		}
+		fileDesc, err := protodesc.NewFile(fileProto, nil)
+		if err != nil {
+			streamOutputRequestDescErr = err
+			return
+		}
+		streamOutputRequestDesc = fileDesc.Messages().ByName("StreamOutputRequest")
+		if streamOutputRequestDesc == nil {
+			streamOutputRequestDescErr = fmt.Errorf("stream output request descriptor not found")
+		}
+	})
+	return streamOutputRequestDesc, streamOutputRequestDescErr
+}
+
+func buildStreamOutputRequestMessage(taskID, actionID string, payload []byte) (proto.Message, error) {
+	desc, err := streamOutputRequestDescriptor()
+	if err != nil {
+		return nil, fmt.Errorf("stream output descriptor: %w", err)
+	}
+	msg := dynamicpb.NewMessage(desc)
+	fields := desc.Fields()
+	msg.Set(fields.ByName("task_id"), protoreflect.ValueOfString(taskID))
+	msg.Set(fields.ByName("action_id"), protoreflect.ValueOfString(actionID))
+	if len(payload) > 0 {
+		msg.Set(fields.ByName("payload"), protoreflect.ValueOfBytes(payload))
+	}
+	return msg, nil
+}
+
+type streamOutputReceiver interface {
+	Recv() (*v1.StreamChunk, error)
+}
+
+type rawStreamOutputClient struct {
+	grpc.ClientStream
+}
+
+func (c *rawStreamOutputClient) Recv() (*v1.StreamChunk, error) {
+	chunk := &v1.StreamChunk{}
+	if err := c.ClientStream.RecvMsg(chunk); err != nil {
+		return nil, err
+	}
+	return chunk, nil
 }
 
 // GRPCExecutorClient implements runtimeclient.ExecutorClient via gRPC.
@@ -70,13 +155,50 @@ func (c *GRPCExecutorClient) ExecuteAction(ctx context.Context, taskID string, a
 	}, nil
 }
 
-// ExecuteStream implements runtimeclient.StreamingExecutorClient.
-func (c *GRPCExecutorClient) ExecuteStream(ctx context.Context, taskID string, action *taskdsl.Action, sink func(runtimeclient.StreamChunk)) (*runtimeclient.ExecutionResult, error) {
-	payload, _ := json.Marshal(normalizeActionPayload(action.Payload))
-	stream, err := c.client.StreamOutput(ctx, &v1.StreamOutputRequest{
+func (c *GRPCExecutorClient) openStreamOutput(ctx context.Context, taskID string, action *taskdsl.Action, payload []byte) (streamOutputReceiver, error) {
+	var dynamicErr error
+	if c.conn != nil {
+		msg, err := buildStreamOutputRequestMessage(taskID, action.ID, payload)
+		if err != nil {
+			dynamicErr = err
+		} else {
+			stream, err := c.conn.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true}, "/agentos.v1.RuntimeService/StreamOutput")
+			if err != nil {
+				dynamicErr = err
+			} else {
+				if err := stream.SendMsg(msg); err != nil {
+					dynamicErr = err
+				} else if err := stream.CloseSend(); err != nil {
+					dynamicErr = err
+				} else {
+					return &rawStreamOutputClient{ClientStream: stream}, nil
+				}
+			}
+		}
+	}
+	if c.client == nil {
+		if dynamicErr != nil {
+			return nil, dynamicErr
+		}
+		return nil, fmt.Errorf("stream output client not configured")
+	}
+	legacy, err := c.client.StreamOutput(ctx, &v1.StreamOutputRequest{
 		TaskId:   taskID,
 		ActionId: string(payload),
 	})
+	if err != nil {
+		if dynamicErr != nil {
+			return nil, fmt.Errorf("stream output dynamic path: %v; legacy fallback: %w", dynamicErr, err)
+		}
+		return nil, err
+	}
+	return legacy, nil
+}
+
+// ExecuteStream implements runtimeclient.StreamingExecutorClient.
+func (c *GRPCExecutorClient) ExecuteStream(ctx context.Context, taskID string, action *taskdsl.Action, sink func(runtimeclient.StreamChunk)) (*runtimeclient.ExecutionResult, error) {
+	payload, _ := json.Marshal(normalizeActionPayload(action.Payload))
+	stream, err := c.openStreamOutput(ctx, taskID, action, payload)
 	if err != nil {
 		return nil, fmt.Errorf("stream output: %w", err)
 	}
@@ -132,5 +254,8 @@ func (c *GRPCExecutorClient) ExecuteStream(ctx context.Context, taskID string, a
 
 // Close closes the gRPC connection.
 func (c *GRPCExecutorClient) Close() error {
+	if c.conn == nil {
+		return nil
+	}
 	return c.conn.Close()
 }

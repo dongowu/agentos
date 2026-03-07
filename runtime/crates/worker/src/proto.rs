@@ -33,6 +33,8 @@ pub struct StreamOutputRequest {
     pub task_id: ::prost::alloc::string::String,
     #[prost(string, tag = "2")]
     pub action_id: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "3")]
+    pub payload: ::prost::alloc::vec::Vec<u8>,
 }
 
 /// A chunk of streaming output data.
