@@ -8,6 +8,7 @@ type Task struct {
 	Prompt    string
 	State     string
 	Plan      *Plan
+	Result    string // final answer from agent loop
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

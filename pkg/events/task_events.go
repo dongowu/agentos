@@ -44,3 +44,11 @@ type ActionCompleted struct {
 	Error    string    `json:"error,omitempty"`
 	Occurred time.Time `json:"occurred"`
 }
+
+// LoopIteration is emitted after each agent loop iteration.
+type LoopIteration struct {
+	TaskID    string    `json:"task_id"`
+	Iteration int       `json:"iteration"`
+	ToolCalls int       `json:"tool_calls"`
+	Occurred  time.Time `json:"occurred"`
+}
