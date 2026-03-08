@@ -22,6 +22,7 @@ import (
 	"github.com/dongowu/agentos/internal/policy"
 	"github.com/dongowu/agentos/internal/runtimeclient"
 	"github.com/dongowu/agentos/internal/scheduler"
+	"github.com/dongowu/agentos/internal/tool"
 	"github.com/dongowu/agentos/internal/worker"
 	"github.com/dongowu/agentos/pkg/config"
 	"github.com/dongowu/agentos/pkg/events"
@@ -228,6 +229,13 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		WithMemoryHook(memoryHook).
 		WithVault(vault).
 		WithAuditStore(audit)
+
+	// Wire agent loop when LLM is configured.
+	llmProv, llmModel := llmProviderFromConfig(cfg)
+	if llmProv != nil {
+		engine.WithLLMProvider(llmProv, llmModel)
+		engine.WithTools(tool.AllTools())
+	}
 
 	go engine.ProcessResults(ctx)
 
