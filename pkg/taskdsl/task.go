@@ -6,6 +6,8 @@ import "time"
 type Task struct {
 	ID        string
 	Prompt    string
+	TenantID  string
+	AgentName string
 	State     string
 	Plan      *Plan
 	Result    string // final answer from agent loop

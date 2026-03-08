@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/dongowu/agentos/internal/agent"
 	"github.com/dongowu/agentos/internal/tool"
@@ -15,7 +16,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var serverURL string
+var (
+	serverURL string
+	authToken string
+)
 
 func main() {
 	root := cobra.Command{
@@ -23,6 +27,7 @@ func main() {
 		Short: "ClawOS CLI",
 	}
 	root.PersistentFlags().StringVar(&serverURL, "server", "http://localhost:8080", "ClawOS server URL")
+	root.PersistentFlags().StringVar(&authToken, "token", os.Getenv("AGENTOS_AUTH_TOKEN"), "Bearer token for authenticated AgentOS servers")
 
 	root.AddCommand(runCmd())
 	root.AddCommand(statusCmd())
@@ -47,23 +52,9 @@ func runCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load agent: %w", err)
 			}
-
-			body, _ := json.Marshal(map[string]string{
-				"agent": cfg.Name,
-				"task":  task,
-			})
-			resp, err := http.Post(serverURL+"/agent/run", "application/json", bytes.NewReader(body))
+			result, err := submitAgentTask(cfg.Name, task)
 			if err != nil {
-				return fmt.Errorf("agent run: %w", err)
-			}
-			defer resp.Body.Close()
-
-			var result apiResponse
-			if err := decodeAPIResponse(resp, &result); err != nil {
 				return err
-			}
-			if result.Error != "" {
-				return fmt.Errorf("server: %s", result.Error)
 			}
 			cmd.Printf("task %s created (state: %s)\n", result.TaskID, result.State)
 			cmd.Printf("check status: claw --server %s status %s\n", serverURL, result.TaskID)
@@ -79,7 +70,7 @@ func statusCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			taskID := args[0]
-			resp, err := http.Get(serverURL + "/agent/status?task_id=" + taskID)
+			resp, err := doAPIRequest(http.MethodGet, "/agent/status?task_id="+taskID, nil, "")
 			if err != nil {
 				return fmt.Errorf("agent status: %w", err)
 			}
@@ -142,6 +133,83 @@ type apiResponse struct {
 	Error  string `json:"error"`
 }
 
+type healthResponse struct {
+	Status string `json:"status"`
+}
+
+type agentListResponse struct {
+	Agents []string `json:"agents"`
+}
+
+func newAPIRequest(method, path string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequest(method, serverURL+path, body)
+	if err != nil {
+		return nil, err
+	}
+	if authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+authToken)
+	}
+	return req, nil
+}
+
+func doAPIRequest(method, path string, body io.Reader, contentType string) (*http.Response, error) {
+	req, err := newAPIRequest(method, path, body)
+	if err != nil {
+		return nil, err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	return http.DefaultClient.Do(req)
+}
+
+func submitAgentTask(agentName, task string) (*apiResponse, error) {
+	body, _ := json.Marshal(map[string]string{
+		"agent": agentName,
+		"task":  task,
+	})
+	resp, err := doAPIRequest(http.MethodPost, "/agent/run", bytes.NewReader(body), "application/json")
+	if err != nil {
+		return nil, fmt.Errorf("agent run: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result apiResponse
+	if err := decodeAPIResponse(resp, &result); err != nil {
+		return nil, err
+	}
+	if result.Error != "" {
+		return nil, fmt.Errorf("server: %s", result.Error)
+	}
+	return &result, nil
+}
+
+func fetchHealth() (*healthResponse, error) {
+	resp, err := doAPIRequest(http.MethodGet, "/health", nil, "")
+	if err != nil {
+		return nil, fmt.Errorf("health: %w", err)
+	}
+	defer resp.Body.Close()
+	var result healthResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode health: %w", err)
+	}
+	return &result, nil
+}
+
+func fetchAgents() (*agentListResponse, error) {
+	resp, err := doAPIRequest(http.MethodGet, "/agent/list", nil, "")
+	if err != nil {
+		return nil, fmt.Errorf("agent list: %w", err)
+	}
+	defer resp.Body.Close()
+	var result agentListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode agent list: %w", err)
+	}
+	return &result, nil
+}
+
 func decodeAPIResponse(resp *http.Response, out *apiResponse) error {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -161,10 +229,41 @@ func decodeAPIResponse(resp *http.Response, out *apiResponse) error {
 
 func devCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "dev",
-		Short: "Start local dev agent (placeholder)",
+		Use:   "dev [agent.yaml] [task]",
+		Short: "Run local dev diagnostics or submit a task quickly",
+		Args:  cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cmd.Println("claw dev: start clawd server first, then use claw run")
+			if len(args) == 0 {
+				health, err := fetchHealth()
+				if err != nil {
+					return err
+				}
+				agents, err := fetchAgents()
+				if err != nil {
+					return err
+				}
+				cmd.Printf("server: %s\n", health.Status)
+				if len(agents.Agents) == 0 {
+					cmd.Println("agents: (none)")
+				} else {
+					cmd.Printf("agents: %s\n", strings.Join(agents.Agents, ", "))
+				}
+					cmd.Println("next: claw dev <agent.yaml> \"<task>\"")
+				return nil
+			}
+			if len(args) != 2 {
+				return fmt.Errorf("dev mode requires either no args or: claw dev <agent.yaml> <task>")
+			}
+			cfg, err := agent.Load(args[0])
+			if err != nil {
+				return fmt.Errorf("load agent: %w", err)
+			}
+			result, err := submitAgentTask(cfg.Name, args[1])
+			if err != nil {
+				return err
+			}
+			cmd.Printf("task %s created (state: %s)\n", result.TaskID, result.State)
+			cmd.Printf("check status: claw --server %s status %s\n", serverURL, result.TaskID)
 			return nil
 		},
 	}

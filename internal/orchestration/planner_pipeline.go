@@ -2,6 +2,7 @@ package orchestration
 
 import (
 	"context"
+	"errors"
 
 	"github.com/dongowu/agentos/pkg/taskdsl"
 )
@@ -29,6 +30,9 @@ func (p *RetryPlanner) Plan(ctx context.Context, input PlanInput) (*taskdsl.Plan
 		lastErr = err
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if errors.Is(err, ErrMalformedPlan) {
+			return nil, err
 		}
 	}
 	return nil, lastErr

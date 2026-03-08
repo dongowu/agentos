@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/dongowu/agentos/internal/actionbridge"
 	"github.com/dongowu/agentos/internal/adapters/llm"
 	"github.com/dongowu/agentos/internal/memory"
 	"github.com/dongowu/agentos/internal/messaging"
@@ -33,6 +34,7 @@ type EngineImpl struct {
 	llmProvider   llm.Provider // nil = use legacy plan+execute path
 	llmModel      string
 	tools         []tool.Tool // tools available for agent loop
+	actionBridge  *actionbridge.Bridge
 }
 
 // NewEngineImpl returns a new task engine.
@@ -78,6 +80,12 @@ func (e *EngineImpl) WithAuditStore(store persistence.AuditLogStore) *EngineImpl
 	return e
 }
 
+// WithActionBridge attaches a control-plane tool action bridge to the engine.
+func (e *EngineImpl) WithActionBridge(bridge *actionbridge.Bridge) *EngineImpl {
+	e.actionBridge = bridge
+	return e
+}
+
 // StartTask creates a task, runs planning, attaches plan, and executes or dispatches actions.
 func (e *EngineImpl) StartTask(ctx context.Context, prompt string) (*taskdsl.Task, error) {
 	return e.StartTaskWithInput(ctx, StartTaskInput{Prompt: prompt})
@@ -88,6 +96,8 @@ func (e *EngineImpl) StartTaskWithInput(ctx context.Context, input StartTaskInpu
 	task := &taskdsl.Task{
 		ID:        fmt.Sprintf("task-%d", time.Now().UnixNano()),
 		Prompt:    input.Prompt,
+		TenantID:  input.TenantID,
+		AgentName: input.AgentName,
 		State:     string(Pending),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -109,7 +119,7 @@ func (e *EngineImpl) StartTaskWithInput(ctx context.Context, input StartTaskInpu
 
 	planningPrompt := input.Prompt
 	if e.memoryHook != nil {
-		if recalled, err := e.memoryHook.RecallContext(ctx, input.Prompt, 3); err == nil && len(recalled) > 0 {
+		if recalled, err := e.memoryHook.RecallScopedContext(ctx, input.TenantID, input.AgentName, input.Prompt, 3); err == nil && len(recalled) > 0 {
 			planningPrompt = augmentPlanningPrompt(input.Prompt, recalled)
 		}
 	}
@@ -128,75 +138,44 @@ func (e *EngineImpl) StartTaskWithInput(ctx context.Context, input StartTaskInpu
 	if err := e.transition(ctx, task, Queued); err != nil {
 		return task, err
 	}
-
-	for i := range plan.Actions {
-		action := &plan.Actions[i]
-		profile := action.RuntimeEnv
-		if e.skillResolver != nil {
-			if p, err := e.skillResolver.Resolve(action); err == nil {
-				profile = p
-			}
-		}
-		action.RuntimeEnv = profile
-
-		injectCredentialToken(ctx, e.vault, input.AgentName, action)
-
-		// Policy check: evaluate before dispatching each action.
-		if e.policy != nil {
-			decision, err := e.policy.Evaluate(ctx, policy.PolicyRequest{
-				AgentName: input.AgentName,
-				ToolName:  action.Kind,
-				Command:   extractCommand(action),
-				TenantID:  input.TenantID,
-			})
-			if err != nil {
-				_ = e.bus.Publish(ctx, "task.action.denied", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Occurred: time.Now()})
-				_ = e.transition(ctx, task, Failed)
-				return task, fmt.Errorf("policy error: %w", err)
-			}
-			if !decision.Allowed {
-				_ = e.bus.Publish(ctx, "task.action.denied", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Occurred: time.Now()})
-				_ = e.transition(ctx, task, Failed)
-				return task, fmt.Errorf("policy denied: %s", decision.Reason)
-			}
-		}
-
-		_ = e.bus.Publish(ctx, "task.action.dispatched", &events.ActionDispatched{TaskID: task.ID, ActionID: action.ID, Occurred: time.Now()})
-
-		// Scheduler path: non-blocking dispatch.
-		if e.scheduler != nil {
-			if err := e.transition(ctx, task, Running); err != nil {
-				return task, err
-			}
-			if err := e.scheduler.Submit(ctx, task.ID, action); err != nil {
-				if e.executor != nil {
-					result, execErr := e.executeDirect(ctx, task, action)
-					if execErr != nil {
-						return task, fmt.Errorf("scheduler submit: %w; direct execute: %w", err, execErr)
-					}
-					return result, nil
-				}
-				_ = e.transition(ctx, task, Failed)
-				return task, fmt.Errorf("scheduler submit: %w", err)
-			}
-			// Return immediately; ProcessResults handles completion.
-			return e.repo.Get(ctx, task.ID)
-		}
-
-		// Direct executor path (fallback).
-		if e.executor != nil {
-			result, err := e.executeDirect(ctx, task, action)
-			if err != nil {
-				return task, err
-			}
-			return result, nil
-		}
-	}
-
-	if e.executor != nil && len(plan.Actions) > 0 {
+	if len(plan.Actions) == 0 {
 		return e.repo.Get(ctx, task.ID)
 	}
 
+	if e.scheduler != nil {
+		first := &plan.Actions[0]
+		if err := e.prepareAction(ctx, task, first); err != nil {
+			return task, err
+		}
+		e.publishActionDispatched(ctx, task.ID, first.ID)
+		if err := e.transition(ctx, task, Running); err != nil {
+			return task, err
+		}
+		if err := e.scheduler.Submit(ctx, task.ID, first); err != nil {
+			if e.executor != nil || e.actionBridge != nil {
+				result, execErr := e.executeDirectFromIndex(ctx, task, 0, true, true)
+				if execErr != nil {
+					return task, fmt.Errorf("scheduler submit: %w; direct execute: %w", err, execErr)
+				}
+				return result, nil
+			}
+			_ = e.transition(ctx, task, Failed)
+			return task, fmt.Errorf("scheduler submit: %w", err)
+		}
+		return e.repo.Get(ctx, task.ID)
+	}
+
+	if e.executor != nil || e.actionBridge != nil {
+		return e.executeDirectFromIndex(ctx, task, 0, false, false)
+	}
+
+	for i := range plan.Actions {
+		action := &plan.Actions[i]
+		if err := e.prepareAction(ctx, task, action); err != nil {
+			return task, err
+		}
+		e.publishActionDispatched(ctx, task.ID, action.ID)
+	}
 	return e.repo.Get(ctx, task.ID)
 }
 
@@ -234,22 +213,38 @@ func (e *EngineImpl) ProcessResults(ctx context.Context) {
 			_ = e.bus.Publish(ctx, "task.action.completed", completed)
 			action := findTaskAction(task, result.ActionID)
 			e.appendAudit(ctx, task, action, &result, completed.Error)
+			e.storeActionResult(ctx, task, result.ActionID, result.ExitCode, string(result.Stdout), string(result.Stderr), result.WorkerID)
 			if result.ExitCode != 0 || result.Error != nil {
 				_ = e.transition(ctx, task, Failed)
-			} else {
-				// Transition through evaluating to succeeded.
-				_ = e.transition(ctx, task, Evaluating)
-				_ = e.transition(ctx, task, Succeeded)
+				continue
 			}
-			if e.memoryHook != nil {
-				_ = e.memoryHook.StoreResult(ctx, result.TaskID, map[string]any{
-					"action_id": result.ActionID,
-					"exit_code": result.ExitCode,
-					"stdout":    string(result.Stdout),
-					"stderr":    string(result.Stderr),
-					"worker_id": result.WorkerID,
-				})
+			nextIndex := nextTaskActionIndex(task, result.ActionID)
+			if nextIndex >= 0 {
+				nextAction := &task.Plan.Actions[nextIndex]
+				if err := e.transition(ctx, task, Evaluating); err != nil {
+					continue
+				}
+				if err := e.transition(ctx, task, Queued); err != nil {
+					continue
+				}
+				if err := e.prepareAction(ctx, task, nextAction); err != nil {
+					continue
+				}
+				e.publishActionDispatched(ctx, task.ID, nextAction.ID)
+				if err := e.transition(ctx, task, Running); err != nil {
+					continue
+				}
+				if err := e.scheduler.Submit(ctx, task.ID, nextAction); err != nil {
+					if e.executor != nil || e.actionBridge != nil {
+						_, _ = e.executeDirectFromIndex(ctx, task, nextIndex, true, true)
+					} else {
+						_ = e.transition(ctx, task, Failed)
+					}
+				}
+				continue
 			}
+			_ = e.transition(ctx, task, Evaluating)
+			_ = e.transition(ctx, task, Succeeded)
 		}
 	}
 }
@@ -286,20 +281,79 @@ func (e *EngineImpl) GetTask(ctx context.Context, taskID string) (*taskdsl.Task,
 }
 
 func (e *EngineImpl) executeDirect(ctx context.Context, task *taskdsl.Task, action *taskdsl.Action) (*taskdsl.Task, error) {
-	if TaskState(task.State) != Running {
-		if err := e.transition(ctx, task, Running); err != nil {
+	startIndex := 0
+	if action != nil {
+		startIndex = taskActionIndex(task, action.ID)
+		if startIndex < 0 {
+			return task, fmt.Errorf("action not found in task plan: %s", action.ID)
+		}
+	}
+	return e.executeDirectFromIndex(ctx, task, startIndex, false, false)
+}
+
+func (e *EngineImpl) executeDirectFromIndex(ctx context.Context, task *taskdsl.Task, startIndex int, preparedFirst bool, dispatchedFirst bool) (*taskdsl.Task, error) {
+	if task == nil || task.Plan == nil {
+		return task, nil
+	}
+	for index := startIndex; index < len(task.Plan.Actions); index++ {
+		action := &task.Plan.Actions[index]
+		if !(index == startIndex && preparedFirst) {
+			if err := e.prepareAction(ctx, task, action); err != nil {
+				return task, err
+			}
+		}
+		if !(index == startIndex && dispatchedFirst) {
+			e.publishActionDispatched(ctx, task.ID, action.ID)
+		}
+		if TaskState(task.State) != Running {
+			if err := e.transition(ctx, task, Running); err != nil {
+				return task, err
+			}
+		}
+		result, err := e.executeDirectSingle(ctx, task, action)
+		if err != nil {
+			if err := e.transition(ctx, task, Failed); err != nil {
+				return task, err
+			}
+			return e.repo.Get(ctx, task.ID)
+		}
+		if err := e.transition(ctx, task, Evaluating); err != nil {
+			return task, err
+		}
+		e.storeActionResult(ctx, task, action.ID, result.ExitCode, string(result.Stdout), string(result.Stderr), "")
+		if result.ExitCode != 0 {
+			if err := e.transition(ctx, task, Failed); err != nil {
+				return task, err
+			}
+			return e.repo.Get(ctx, task.ID)
+		}
+		if index == len(task.Plan.Actions)-1 {
+			if err := e.transition(ctx, task, Succeeded); err != nil {
+				return task, err
+			}
+			return e.repo.Get(ctx, task.ID)
+		}
+		if err := e.transition(ctx, task, Queued); err != nil {
 			return task, err
 		}
 	}
+	return e.repo.Get(ctx, task.ID)
+}
+
+func (e *EngineImpl) executeDirectSingle(ctx context.Context, task *taskdsl.Task, action *taskdsl.Action) (*runtimeclient.ExecutionResult, error) {
 	var (
 		result *runtimeclient.ExecutionResult
 		err    error
 	)
-	if streamer, ok := e.executor.(runtimeclient.StreamingExecutorClient); ok {
+	if e.actionBridge != nil && e.actionBridge.CanExecute(action) {
+		result, err = e.actionBridge.Execute(ctx, task.ID, action, func(chunk runtimeclient.StreamChunk) {
+			e.publishActionOutput(ctx, chunk)
+		})
+	} else if streamer, ok := e.executor.(runtimeclient.StreamingExecutorClient); ok {
 		result, err = streamer.ExecuteStream(ctx, task.ID, action, func(chunk runtimeclient.StreamChunk) {
 			e.publishActionOutput(ctx, chunk)
 		})
-	} else {
+	} else if e.executor != nil {
 		result, err = e.executor.ExecuteAction(ctx, task.ID, action)
 		if err == nil && result != nil {
 			if len(result.Stdout) > 0 {
@@ -309,48 +363,76 @@ func (e *EngineImpl) executeDirect(ctx context.Context, task *taskdsl.Task, acti
 				e.publishActionOutput(ctx, runtimeclient.StreamChunk{TaskID: task.ID, ActionID: action.ID, Kind: "stderr", Data: result.Stderr})
 			}
 		}
+	} else {
+		return nil, fmt.Errorf("no executor configured for action %s", action.ID)
 	}
 	if err != nil {
 		completed := &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Error: err.Error(), Occurred: time.Now()}
 		_ = e.bus.Publish(ctx, "task.action.completed", completed)
 		e.appendAudit(ctx, task, action, &scheduler.ActionResult{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Error: err}, err.Error())
-		if err := e.transition(ctx, task, Failed); err != nil {
-			return task, err
-		}
-		return e.repo.Get(ctx, task.ID)
+		return nil, err
 	}
 	completed := &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: result.ExitCode, Stdout: string(result.Stdout), Stderr: string(result.Stderr), Occurred: time.Now()}
 	_ = e.bus.Publish(ctx, "task.action.completed", completed)
 	e.appendAudit(ctx, task, action, &scheduler.ActionResult{TaskID: task.ID, ActionID: action.ID, ExitCode: result.ExitCode, Stdout: result.Stdout, Stderr: result.Stderr}, "")
-	if err := e.transition(ctx, task, Evaluating); err != nil {
-		return task, err
+	return result, nil
+}
+
+func (e *EngineImpl) prepareAction(ctx context.Context, task *taskdsl.Task, action *taskdsl.Action) error {
+	if task == nil || action == nil {
+		return nil
 	}
-	if result.ExitCode != 0 {
-		if err := e.transition(ctx, task, Failed); err != nil {
-			return task, err
+	profile := action.RuntimeEnv
+	if e.skillResolver != nil {
+		resolved, err := e.skillResolver.Resolve(action)
+		if err != nil {
+			_ = e.transition(ctx, task, Failed)
+			return fmt.Errorf("skill resolve: %w", err)
 		}
-		if e.memoryHook != nil {
-			_ = e.memoryHook.StoreResult(ctx, task.ID, map[string]any{
-				"action_id": action.ID,
-				"exit_code": result.ExitCode,
-				"stdout":    string(result.Stdout),
-				"stderr":    string(result.Stderr),
-			})
-		}
-		return e.repo.Get(ctx, task.ID)
+		profile = resolved
 	}
-	if err := e.transition(ctx, task, Succeeded); err != nil {
-		return task, err
+	action.RuntimeEnv = profile
+	injectCredentialToken(ctx, e.vault, task.AgentName, action)
+	if e.policy == nil {
+		return nil
 	}
-	if e.memoryHook != nil {
-		_ = e.memoryHook.StoreResult(ctx, task.ID, map[string]any{
-			"action_id": action.ID,
-			"exit_code": result.ExitCode,
-			"stdout":    string(result.Stdout),
-			"stderr":    string(result.Stderr),
-		})
+	decision, err := e.policy.Evaluate(ctx, policy.PolicyRequest{
+		AgentName: task.AgentName,
+		ToolName:  action.Kind,
+		Command:   extractCommand(action),
+		TenantID:  task.TenantID,
+	})
+	if err != nil {
+		_ = e.bus.Publish(ctx, "task.action.denied", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Occurred: time.Now()})
+		_ = e.transition(ctx, task, Failed)
+		return fmt.Errorf("policy error: %w", err)
 	}
-	return e.repo.Get(ctx, task.ID)
+	if !decision.Allowed {
+		_ = e.bus.Publish(ctx, "task.action.denied", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Occurred: time.Now()})
+		_ = e.transition(ctx, task, Failed)
+		return fmt.Errorf("policy denied: %s", decision.Reason)
+	}
+	return nil
+}
+
+func (e *EngineImpl) publishActionDispatched(ctx context.Context, taskID, actionID string) {
+	if e.bus == nil {
+		return
+	}
+	_ = e.bus.Publish(ctx, "task.action.dispatched", &events.ActionDispatched{TaskID: taskID, ActionID: actionID, Occurred: time.Now()})
+}
+
+func (e *EngineImpl) storeActionResult(ctx context.Context, task *taskdsl.Task, actionID string, exitCode int, stdout, stderr, workerID string) {
+	if e.memoryHook == nil || task == nil {
+		return
+	}
+	_ = e.memoryHook.StoreScopedResult(ctx, task.TenantID, task.AgentName, task.Prompt, task.ID, map[string]any{
+		"action_id": actionID,
+		"exit_code": exitCode,
+		"stdout":    stdout,
+		"stderr":    stderr,
+		"worker_id": workerID,
+	})
 }
 
 func (e *EngineImpl) publishActionOutput(ctx context.Context, chunk runtimeclient.StreamChunk) {
@@ -380,6 +462,8 @@ func (e *EngineImpl) appendAudit(ctx context.Context, task *taskdsl.Task, action
 	_ = e.auditStore.Append(ctx, persistence.AuditRecord{
 		TaskID:      task.ID,
 		ActionID:    result.ActionID,
+		TenantID:    task.TenantID,
+		AgentName:   task.AgentName,
 		Command:     command,
 		RuntimeEnv:  runtimeEnv,
 		WorkerID:    result.WorkerID,
@@ -393,22 +477,42 @@ func (e *EngineImpl) appendAudit(ctx context.Context, task *taskdsl.Task, action
 }
 
 func findTaskAction(task *taskdsl.Task, actionID string) *taskdsl.Action {
-	if task == nil || task.Plan == nil {
+	index := taskActionIndex(task, actionID)
+	if index < 0 {
 		return nil
+	}
+	return &task.Plan.Actions[index]
+}
+
+func taskActionIndex(task *taskdsl.Task, actionID string) int {
+	if task == nil || task.Plan == nil {
+		return -1
 	}
 	for i := range task.Plan.Actions {
 		if task.Plan.Actions[i].ID == actionID {
-			return &task.Plan.Actions[i]
+			return i
 		}
 	}
-	return nil
+	return -1
+}
+
+func nextTaskActionIndex(task *taskdsl.Task, actionID string) int {
+	current := taskActionIndex(task, actionID)
+	if current < 0 || task == nil || task.Plan == nil {
+		return -1
+	}
+	next := current + 1
+	if next >= len(task.Plan.Actions) {
+		return -1
+	}
+	return next
 }
 
 func augmentPlanningPrompt(prompt string, recalled []memory.SearchResult) string {
 	if len(recalled) == 0 {
 		return prompt
 	}
-	contextBlock := "\n\nRelevant past context:\n"
+	contextBlock := relevantPastContextMarker
 	for _, item := range recalled {
 		contextBlock += "- " + string(item.Content) + "\n"
 	}

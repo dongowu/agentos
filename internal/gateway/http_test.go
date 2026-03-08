@@ -16,10 +16,14 @@ type stubTaskAPI struct {
 }
 
 type stubAgentManager struct {
-	agents map[string]bool
+	agents  map[string]bool
+	runtime interface{ CheckPolicy(string) error }
 }
 
 func (m stubAgentManager) Get(name string) interface{ CheckPolicy(string) error } {
+	if m.runtime != nil && m.agents[name] {
+		return m.runtime
+	}
 	if m.agents[name] {
 		return stubAgentRuntime{}
 	}
@@ -137,5 +141,41 @@ func TestServeAgentList_ReturnsLoadedAgents(t *testing.T) {
 	}
 	if len(resp.Agents) != 2 {
 		t.Fatalf("expected 2 agents, got %d", len(resp.Agents))
+	}
+}
+
+
+type stubPromptAgentRuntime struct {
+	prompt string
+}
+
+func (s stubPromptAgentRuntime) CheckPolicy(string) error { return nil }
+func (s stubPromptAgentRuntime) BuildPrompt(task string) string {
+	if s.prompt != "" {
+		return s.prompt
+	}
+	return "agent-aware::" + task
+}
+
+func TestServeAgentRun_UsesAgentAwarePromptWhenAvailable(t *testing.T) {
+	api := &stubTaskAPI{}
+	h := NewHandler(api)
+	h.AgentManager = stubAgentManager{
+		agents:  map[string]bool{"demo": true},
+		runtime: stubPromptAgentRuntime{prompt: "agent-aware::echo hello"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/agent/run", strings.NewReader(`{"agent":"demo","task":"echo hello"}`))
+	rec := httptest.NewRecorder()
+
+	h.ServeAgentRun(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	if api.lastReq.AgentName != "demo" {
+		t.Fatalf("expected agent name forwarded, got %q", api.lastReq.AgentName)
+	}
+	if api.lastReq.Prompt != "agent-aware::echo hello" {
+		t.Fatalf("expected agent-aware prompt, got %q", api.lastReq.Prompt)
 	}
 }

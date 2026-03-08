@@ -169,6 +169,15 @@ func ApplyEnvOverrides(cfg Config) Config {
 	if mode := os.Getenv("AGENTOS_SCHEDULER_MODE"); mode != "" {
 		cfg.Scheduler.Mode = mode
 	}
+	if natsURL := os.Getenv("AGENTOS_NATS_URL"); natsURL != "" {
+		cfg.Messaging.NATS.URL = natsURL
+	}
+	if natsStream := os.Getenv("AGENTOS_NATS_STREAM"); natsStream != "" {
+		cfg.Messaging.NATS.Stream = natsStream
+	}
+	if postgresDSN := os.Getenv("AGENTOS_POSTGRES_DSN"); postgresDSN != "" {
+		cfg.Persistence.Postgres.DSN = postgresDSN
+	}
 	if provider := os.Getenv("AGENTOS_LLM_PROVIDER"); provider != "" {
 		cfg.LLM.Provider = provider
 	}

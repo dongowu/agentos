@@ -3,30 +3,58 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/dongowu/agentos/internal/access"
 	"github.com/spf13/cobra"
 )
 
-// Root returns the root CLI command wired to the given API.
-func Root(api access.TaskSubmissionAPI) *cobra.Command {
+// APIFactory lazily resolves the local in-process API when needed.
+type APIFactory func() (access.TaskSubmissionAPI, error)
+
+type remoteAPIFactory func(serverURL, token string) access.TaskSubmissionAPI
+
+// Root returns the root CLI command wired to either a local factory or a remote API.
+func Root(localFactory APIFactory) *cobra.Command {
+	return newRoot(localFactory, func(serverURL, token string) access.TaskSubmissionAPI {
+		return NewHTTPTaskAPI(serverURL, token)
+	})
+}
+
+func newRoot(localFactory APIFactory, remoteFactory remoteAPIFactory) *cobra.Command {
+	var serverURL string
+	var authToken string
+
+	resolveAPI := func() (access.TaskSubmissionAPI, error) {
+		if serverURL != "" {
+			return remoteFactory(serverURL, authToken), nil
+		}
+		if localFactory == nil {
+			return nil, fmt.Errorf("api not configured (use --server or run with controller/apiserver)")
+		}
+		return localFactory()
+	}
+
 	root := &cobra.Command{
 		Use:   "osctl",
 		Short: "AgentOS CLI",
 	}
-	root.AddCommand(submitCmd(api))
-	root.AddCommand(statusCmd(api))
+	root.PersistentFlags().StringVar(&serverURL, "server", os.Getenv("AGENTOS_SERVER_URL"), "Remote AgentOS API server URL; empty uses local embedded mode")
+	root.PersistentFlags().StringVar(&authToken, "token", os.Getenv("AGENTOS_AUTH_TOKEN"), "Bearer token for authenticated AgentOS API servers")
+	root.AddCommand(submitCmd(resolveAPI))
+	root.AddCommand(statusCmd(resolveAPI))
 	return root
 }
 
-func submitCmd(api access.TaskSubmissionAPI) *cobra.Command {
+func submitCmd(resolveAPI func() (access.TaskSubmissionAPI, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   "submit [prompt]",
 		Short: "Submit a task",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if api == nil {
-				return fmt.Errorf("api not configured (use with controller or apiserver)")
+			api, err := resolveAPI()
+			if err != nil {
+				return err
 			}
 			prompt := args[0]
 			resp, err := api.CreateTask(context.Background(), access.CreateTaskRequest{Prompt: prompt})
@@ -39,14 +67,15 @@ func submitCmd(api access.TaskSubmissionAPI) *cobra.Command {
 	}
 }
 
-func statusCmd(api access.TaskSubmissionAPI) *cobra.Command {
+func statusCmd(resolveAPI func() (access.TaskSubmissionAPI, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status [task-id]",
 		Short: "Get task status",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if api == nil {
-				return fmt.Errorf("api not configured (use with controller or apiserver)")
+			api, err := resolveAPI()
+			if err != nil {
+				return err
 			}
 			taskID := args[0]
 			resp, err := api.GetTask(context.Background(), taskID)

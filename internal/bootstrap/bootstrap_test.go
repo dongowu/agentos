@@ -1,8 +1,11 @@
 package bootstrap
 
 import (
+	"context"
 	"testing"
 
+	"github.com/dongowu/agentos/internal/adapter"
+	"github.com/dongowu/agentos/internal/adapters/llm"
 	"github.com/dongowu/agentos/internal/orchestration"
 	"github.com/dongowu/agentos/pkg/config"
 )
@@ -34,5 +37,22 @@ func TestAuthProviderFromConfig_UsesStaticBearerTokens(t *testing.T) {
 	}}})
 	if provider == nil {
 		t.Fatal("expected auth provider, got nil")
+	}
+}
+
+type bootstrapMockProvider struct{}
+
+func (bootstrapMockProvider) Chat(_ context.Context, _ llm.Request) (*llm.Response, error) {
+	return &llm.Response{Content: `{"Actions":[{"Kind":"command.exec","Payload":{"cmd":"echo ok"}}]}`}, nil
+}
+
+func TestPlannerFromConfig_UsesRegisteredProvider(t *testing.T) {
+	providerName := "bootstrap-test-provider"
+	adapter.RegisterLLMProvider(providerName, func(cfg config.LLMConfig) (llm.Provider, string, error) {
+		return bootstrapMockProvider{}, cfg.Model, nil
+	})
+	planner := plannerFromConfig(config.Config{LLM: config.LLMConfig{Provider: providerName, Model: "custom-model", APIKey: "unused"}})
+	if _, ok := planner.(*orchestration.FallbackPlanner); !ok {
+		t.Fatalf("expected FallbackPlanner, got %T", planner)
 	}
 }

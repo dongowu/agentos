@@ -3,10 +3,12 @@ package orchestration
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/dongowu/agentos/internal/actionbridge"
 	"github.com/dongowu/agentos/internal/adapters/llm"
 	msgmemory "github.com/dongowu/agentos/internal/adapters/messaging/memory"
 	persmemory "github.com/dongowu/agentos/internal/adapters/persistence/memory"
@@ -71,14 +73,38 @@ func (m *mockScheduler) Close() error {
 // --- mock executor ---
 
 type mockExecutor struct {
-	result *runtimeclient.ExecutionResult
-	err    error
-	called int
+	result    *runtimeclient.ExecutionResult
+	err       error
+	called    int
+	actionIDs []string
 }
 
-func (m *mockExecutor) ExecuteAction(_ context.Context, _ string, _ *taskdsl.Action) (*runtimeclient.ExecutionResult, error) {
+func (m *mockExecutor) ExecuteAction(_ context.Context, _ string, action *taskdsl.Action) (*runtimeclient.ExecutionResult, error) {
 	m.called++
+	if action != nil {
+		m.actionIDs = append(m.actionIDs, action.ID)
+	}
 	return m.result, m.err
+}
+
+type sequencePlanner struct {
+	plan *taskdsl.Plan
+	err  error
+}
+
+func (p sequencePlanner) Plan(_ context.Context, _ PlanInput) (*taskdsl.Plan, error) {
+	return p.plan, p.err
+}
+
+type mockSkillResolver struct {
+	resolve func(action *taskdsl.Action) (string, error)
+}
+
+func (m mockSkillResolver) Resolve(action *taskdsl.Action) (string, error) {
+	if m.resolve != nil {
+		return m.resolve(action)
+	}
+	return "default", nil
 }
 
 // --- tests ---
@@ -196,6 +222,130 @@ func TestEngineImpl_SchedulerDispatch_ReturnsRunning(t *testing.T) {
 	}
 	if sched.submitted[0].taskID != task.ID {
 		t.Errorf("submitted task ID mismatch")
+	}
+}
+
+func TestEngineImpl_DirectExecution_RunsMultiStepPlanInOrder(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &recordingPlanner{plan: &taskdsl.Plan{Actions: []taskdsl.Action{
+		{ID: "action-1", Kind: "command.exec", RuntimeEnv: "default", Payload: map[string]any{"cmd": "echo first"}},
+		{ID: "action-2", Kind: "command.exec", RuntimeEnv: "default", Payload: map[string]any{"cmd": "echo second"}},
+	}}}
+	exec := &mockExecutor{result: &runtimeclient.ExecutionResult{ExitCode: 0, Stdout: []byte("ok")}}
+	engine := NewEngineImpl(repo, bus, planner, nil, exec, nil, nil)
+
+	task, err := engine.StartTask(context.Background(), "echo first then echo second")
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if task.State != string(Succeeded) {
+		t.Fatalf("expected state succeeded, got %s", task.State)
+	}
+	if exec.called != 2 {
+		t.Fatalf("expected executor called twice, got %d", exec.called)
+	}
+	if len(exec.actionIDs) != 2 || exec.actionIDs[0] != "action-1" || exec.actionIDs[1] != "action-2" {
+		t.Fatalf("expected action order [action-1 action-2], got %v", exec.actionIDs)
+	}
+}
+
+func TestEngineImpl_ProcessResults_FailsOnSecondActionAndAppendsAudit(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &recordingPlanner{plan: &taskdsl.Plan{Actions: []taskdsl.Action{
+		{ID: "action-1", Kind: "command.exec", RuntimeEnv: "default", Payload: map[string]any{"cmd": "echo first"}},
+		{ID: "action-2", Kind: "command.exec", RuntimeEnv: "default", Payload: map[string]any{"cmd": "echo second"}},
+	}}}
+	sched := newMockScheduler()
+	audit := &mockAuditStore{}
+	engine := NewEngineImpl(repo, bus, planner, nil, nil, nil, sched).WithAuditStore(audit)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	task, err := engine.StartTask(ctx, "echo first then echo second")
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	go engine.ProcessResults(ctx)
+
+	sched.results <- scheduler.ActionResult{TaskID: task.ID, ActionID: "action-1", ExitCode: 0, Stdout: []byte("first")}
+	for deadline := time.Now().Add(300 * time.Millisecond); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if len(sched.submitted) >= 2 {
+			break
+		}
+	}
+	if len(sched.submitted) != 2 {
+		t.Fatalf("expected second action submission, got %d", len(sched.submitted))
+	}
+
+	sched.results <- scheduler.ActionResult{TaskID: task.ID, ActionID: "action-2", ExitCode: 1, Stderr: []byte("boom")}
+	var got *taskdsl.Task
+	for deadline := time.Now().Add(300 * time.Millisecond); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		got, _ = repo.Get(ctx, task.ID)
+		if got != nil && got.State == string(Failed) {
+			break
+		}
+	}
+	if got == nil || got.State != string(Failed) {
+		t.Fatalf("expected state failed after second action, got %#v", got)
+	}
+	if len(audit.records) != 2 {
+		t.Fatalf("expected 2 audit records, got %d", len(audit.records))
+	}
+	if audit.records[0].ActionID != "action-1" || audit.records[1].ActionID != "action-2" {
+		t.Fatalf("unexpected audit records: %+v", audit.records)
+	}
+}
+
+func TestEngineImpl_ProcessResults_SubmitsNextActionBeforeCompletingTask(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &recordingPlanner{plan: &taskdsl.Plan{Actions: []taskdsl.Action{
+		{ID: "action-1", Kind: "command.exec", RuntimeEnv: "default", Payload: map[string]any{"cmd": "echo first"}},
+		{ID: "action-2", Kind: "command.exec", RuntimeEnv: "default", Payload: map[string]any{"cmd": "echo second"}},
+	}}}
+	sched := newMockScheduler()
+	engine := NewEngineImpl(repo, bus, planner, nil, nil, nil, sched)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	task, err := engine.StartTask(ctx, "echo first then echo second")
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if len(sched.submitted) != 1 || sched.submitted[0].action.ID != "action-1" {
+		t.Fatalf("expected first submitted action action-1, got %+v", sched.submitted)
+	}
+
+	go engine.ProcessResults(ctx)
+	sched.results <- scheduler.ActionResult{TaskID: task.ID, ActionID: "action-1", ExitCode: 0}
+
+	for deadline := time.Now().Add(300 * time.Millisecond); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if len(sched.submitted) >= 2 {
+			break
+		}
+	}
+	if len(sched.submitted) != 2 {
+		t.Fatalf("expected second action to be submitted, got %d submissions", len(sched.submitted))
+	}
+	if sched.submitted[1].action.ID != "action-2" {
+		t.Fatalf("expected second submitted action action-2, got %s", sched.submitted[1].action.ID)
+	}
+	got, _ := repo.Get(ctx, task.ID)
+	if got.State == string(Succeeded) {
+		t.Fatalf("expected task not yet succeeded after first result")
+	}
+
+	sched.results <- scheduler.ActionResult{TaskID: task.ID, ActionID: "action-2", ExitCode: 0}
+	for deadline := time.Now().Add(300 * time.Millisecond); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		got, _ = repo.Get(ctx, task.ID)
+		if got.State == string(Succeeded) {
+			break
+		}
+	}
+	if got.State != string(Succeeded) {
+		t.Fatalf("expected state succeeded after second result, got %s", got.State)
 	}
 }
 
@@ -378,6 +528,17 @@ func (m *mockAuditStore) ListByTask(_ context.Context, taskID string) ([]persist
 	return out, nil
 }
 
+func (m *mockAuditStore) Query(_ context.Context, query persistence.AuditQuery) ([]persistence.AuditRecord, error) {
+	var out []persistence.AuditRecord
+	for _, record := range m.records {
+		if query.TaskID != "" && record.TaskID != query.TaskID {
+			continue
+		}
+		out = append(out, record)
+	}
+	return out, nil
+}
+
 func TestEngineImpl_ProcessResults_AppendsAuditRecord(t *testing.T) {
 	repo := persmemory.NewTaskRepository()
 	bus := msgmemory.NewEventBus()
@@ -422,6 +583,39 @@ func TestEngineImpl_ProcessResults_AppendsAuditRecord(t *testing.T) {
 	}
 	if record.Stdout != "done" || record.Stderr != "warn" {
 		t.Fatalf("unexpected audit outputs: %+v", record)
+	}
+}
+
+func TestEngineImpl_ProcessResults_AppendsAuditOwnership(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &StubPlanner{}
+	sched := newMockScheduler()
+	audit := &mockAuditStore{}
+	engine := NewEngineImpl(repo, bus, planner, nil, nil, nil, sched).WithAuditStore(audit)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	task, err := engine.StartTaskWithInput(ctx, StartTaskInput{Prompt: "echo hello", TenantID: "tenant-a", AgentName: "ops-agent"})
+	if err != nil {
+		t.Fatalf("StartTaskWithInput: %v", err)
+	}
+
+	go engine.ProcessResults(ctx)
+	sched.results <- scheduler.ActionResult{TaskID: task.ID, ActionID: "action-1", ExitCode: 0}
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if len(audit.records) == 1 {
+			break
+		}
+	}
+	if len(audit.records) != 1 {
+		t.Fatalf("expected 1 audit record, got %d", len(audit.records))
+	}
+	if audit.records[0].TenantID != "tenant-a" {
+		t.Fatalf("expected tenant-a, got %q", audit.records[0].TenantID)
+	}
+	if audit.records[0].AgentName != "ops-agent" {
+		t.Fatalf("expected ops-agent, got %q", audit.records[0].AgentName)
 	}
 }
 
@@ -605,5 +799,88 @@ func TestEngineImpl_AgentLoop_FallbackWithoutProvider(t *testing.T) {
 	}
 	if task.State != string(Queued) {
 		t.Errorf("expected queued (legacy path), got %s", task.State)
+	}
+}
+
+func TestEngineImpl_SkillResolverError_FailsTask(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &StubPlanner{}
+	resolver := mockSkillResolver{resolve: func(action *taskdsl.Action) (string, error) {
+		return "", fmt.Errorf("unsupported action kind: %s", action.Kind)
+	}}
+	engine := NewEngineImpl(repo, bus, planner, resolver, nil, nil, nil)
+	ctx := context.Background()
+
+	task, err := engine.StartTask(ctx, "echo hello")
+	if err == nil {
+		t.Fatal("expected resolver error")
+	}
+	if task == nil {
+		t.Fatal("expected task")
+	}
+	got, getErr := repo.Get(ctx, task.ID)
+	if getErr != nil {
+		t.Fatalf("repo.Get: %v", getErr)
+	}
+	if got.State != string(Failed) {
+		t.Fatalf("expected failed state, got %s", got.State)
+	}
+}
+
+func TestEngineImpl_ProcessResults_SkillResolverError_FailsFollowupAction(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &sequencePlanner{plan: &taskdsl.Plan{Actions: []taskdsl.Action{
+		{ID: "action-1", Kind: "command.exec", RuntimeEnv: "default", Payload: map[string]any{"cmd": "echo first"}},
+		{ID: "action-2", Kind: "command.exec", RuntimeEnv: "default", Payload: map[string]any{"cmd": "echo second"}},
+	}}}
+	resolver := mockSkillResolver{resolve: func(action *taskdsl.Action) (string, error) {
+		if action.ID == "action-2" {
+			return "", fmt.Errorf("unsupported action kind: %s", action.Kind)
+		}
+		return "default", nil
+	}}
+	sched := newMockScheduler()
+	engine := NewEngineImpl(repo, bus, planner, resolver, nil, nil, sched)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	task, err := engine.StartTask(ctx, "echo hello")
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	go engine.ProcessResults(ctx)
+	sched.results <- scheduler.ActionResult{TaskID: task.ID, ActionID: "action-1", ExitCode: 0}
+
+	var got *taskdsl.Task
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		got, _ = repo.Get(ctx, task.ID)
+		if got != nil && got.State == string(Failed) {
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("expected task from repo")
+	}
+	if got.State != string(Failed) {
+		t.Fatalf("expected failed state after follow-up resolution error, got %s", got.State)
+	}
+}
+
+func TestEngineImpl_DirectExecution_UsesActionBridgeWithoutWorker(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	path := filepath.Join(t.TempDir(), "bridge-direct.txt")
+	planner := sequencePlanner{plan: &taskdsl.Plan{Actions: []taskdsl.Action{{ID: "action-1", Kind: "file.write", Payload: map[string]any{"path": path, "content": "from-bridge"}}}}}
+	engine := NewEngineImpl(repo, bus, planner, nil, nil, nil, nil).WithActionBridge(actionbridge.New())
+	ctx := context.Background()
+
+	task, err := engine.StartTask(ctx, "write file")
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if task.State != string(Succeeded) {
+		t.Fatalf("expected succeeded, got %s", task.State)
 	}
 }

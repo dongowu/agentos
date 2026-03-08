@@ -44,6 +44,10 @@ type ToolRunRequest struct {
 	Input map[string]any `json:"input"`
 }
 
+type promptBuilder interface {
+	BuildPrompt(task string) string
+}
+
 // ServeAgentRun handles POST /agent/run.
 func (h *Handler) ServeAgentRun(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -60,15 +64,16 @@ func (h *Handler) ServeAgentRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// MVP: use task as prompt. Agent name used for future routing.
 	prompt := req.Task
 	agentName := req.Agent
 	if agentName != "" && h.AgentManager != nil {
-		// Validate agent exists
 		ag := h.AgentManager.Get(agentName)
 		if ag == nil {
 			writeJSONError(w, http.StatusNotFound, "agent not found: "+agentName)
 			return
+		}
+		if builder, ok := ag.(promptBuilder); ok {
+			prompt = builder.BuildPrompt(req.Task)
 		}
 	}
 

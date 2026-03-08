@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -71,5 +72,36 @@ func TestServer_Handler_HealthRoute(t *testing.T) {
 	}
 	if resp.Status != "ok" {
 		t.Fatalf("expected status ok, got %q", resp.Status)
+	}
+}
+
+func TestServer_Handler_RequiresBearerTokenForGatewayRoutesWhenAuthConfigured(t *testing.T) {
+	gw := gateway.NewHandler(stubTaskAPI{})
+	gw.AgentManager = stubAgentManager{}
+	srv := &Server{Gateway: gw, API: stubTaskAPI{}, Auth: &stubAuthProvider{principal: &access.Principal{Subject: "user-1", TenantID: "tenant-auth"}}}
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   []byte
+	}{
+		{name: "agent list", method: http.MethodGet, path: "/agent/list"},
+		{name: "agent status", method: http.MethodGet, path: "/agent/status?task_id=task-123"},
+		{name: "agent run", method: http.MethodPost, path: "/agent/run", body: []byte(`{"agent":"demo","task":"echo hi"}`)},
+		{name: "tool run", method: http.MethodPost, path: "/tool/run", body: []byte(`{"tool":"file.read","input":{"path":"/tmp/x"}}`)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, bytes.NewReader(tc.body))
+			if len(tc.body) > 0 {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			rec := httptest.NewRecorder()
+			srv.handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("expected status 401, got %d", rec.Code)
+			}
+		})
 	}
 }
