@@ -31,11 +31,36 @@ type chatRequest struct {
 	Model       string        `json:"model"`
 	Messages    []chatMessage `json:"messages"`
 	Temperature float64       `json:"temperature"`
+	Tools       []chatTool    `json:"tools,omitempty"`
 }
 
 type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string         `json:"role"`
+	Content    string         `json:"content,omitempty"`
+	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
+}
+
+type chatTool struct {
+	Type     string       `json:"type"`
+	Function chatFunction `json:"function"`
+}
+
+type chatFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
+}
+
+type chatToolCall struct {
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
+	Function chatFunctionCall `json:"function"`
+}
+
+type chatFunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 // chatResponse mirrors the OpenAI chat completion response shape.
@@ -51,7 +76,18 @@ type chatChoice struct {
 func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	messages := make([]chatMessage, len(req.Messages))
 	for i, m := range req.Messages {
-		messages[i] = chatMessage{Role: m.Role, Content: m.Content}
+		msg := chatMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
+		for _, tc := range m.ToolCalls {
+			msg.ToolCalls = append(msg.ToolCalls, chatToolCall{
+				ID:   tc.ID,
+				Type: "function",
+				Function: chatFunctionCall{
+					Name:      tc.Name,
+					Arguments: tc.Arguments,
+				},
+			})
+		}
+		messages[i] = msg
 	}
 
 	body := chatRequest{
@@ -59,6 +95,17 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		Messages:    messages,
 		Temperature: req.Temperature,
 	}
+	for _, td := range req.Tools {
+		body.Tools = append(body.Tools, chatTool{
+			Type: "function",
+			Function: chatFunction{
+				Name:        td.Name,
+				Description: td.Description,
+				Parameters:  td.Parameters,
+			},
+		})
+	}
+
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("openai: marshal request: %w", err)
@@ -91,5 +138,14 @@ func (c *Client) Chat(ctx context.Context, req llm.Request) (*llm.Response, erro
 		return nil, fmt.Errorf("openai: empty choices in response")
 	}
 
-	return &llm.Response{Content: resp.Choices[0].Message.Content}, nil
+	choice := resp.Choices[0].Message
+	result := &llm.Response{Content: choice.Content}
+	for _, tc := range choice.ToolCalls {
+		result.ToolCalls = append(result.ToolCalls, llm.ToolCall{
+			ID:        tc.ID,
+			Name:      tc.Function.Name,
+			Arguments: tc.Function.Arguments,
+		})
+	}
+	return result, nil
 }
