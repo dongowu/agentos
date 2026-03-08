@@ -35,3 +35,9 @@ go run ./cmd/osctl submit "echo hello"
 ## Interface-First
 
 Major subsystems use interfaces so implementations are pluggable. See README "Plug-in Boundaries" for details.
+
+## Community Guidelines
+
+- By participating, you agree to follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+- For security issues, do not open a public issue; follow [SECURITY.md](SECURITY.md).
+- Unless otherwise stated, contributions to the open-source core are submitted under the repository license in [LICENSE](LICENSE).
