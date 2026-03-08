@@ -2,15 +2,18 @@ package orchestration
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/dongowu/agentos/internal/adapters/llm"
 	"github.com/dongowu/agentos/internal/memory"
 	"github.com/dongowu/agentos/internal/messaging"
 	"github.com/dongowu/agentos/internal/persistence"
 	"github.com/dongowu/agentos/internal/policy"
 	"github.com/dongowu/agentos/internal/runtimeclient"
 	"github.com/dongowu/agentos/internal/scheduler"
+	"github.com/dongowu/agentos/internal/tool"
 	"github.com/dongowu/agentos/pkg/events"
 	"github.com/dongowu/agentos/pkg/taskdsl"
 )
@@ -27,6 +30,9 @@ type EngineImpl struct {
 	memoryHook    *MemoryHook
 	vault         policy.CredentialVault
 	auditStore    persistence.AuditLogStore
+	llmProvider   llm.Provider // nil = use legacy plan+execute path
+	llmModel      string
+	tools         []tool.Tool // tools available for agent loop
 }
 
 // NewEngineImpl returns a new task engine.
@@ -90,6 +96,12 @@ func (e *EngineImpl) StartTaskWithInput(ctx context.Context, input StartTaskInpu
 		return nil, err
 	}
 	_ = e.bus.Publish(ctx, "task.created", &events.TaskCreated{TaskID: task.ID, Prompt: input.Prompt, Occurred: time.Now()})
+
+	// Agent loop path: when an LLM provider is configured, use the multi-turn
+	// tool-calling loop instead of the legacy plan+execute path.
+	if e.llmProvider != nil {
+		return e.runAgentLoop(ctx, task)
+	}
 
 	if err := e.transition(ctx, task, Planning); err != nil {
 		return task, err
@@ -438,4 +450,147 @@ func extractCommand(action *taskdsl.Action) string {
 		}
 	}
 	return ""
+}
+
+const maxAgentLoopIterations = 10
+
+const agentSystemPrompt = `You are an AI agent running on AgentOS. You have access to tools that you can call to accomplish tasks.
+
+When you need to perform an action, use the available tools. When you have completed the task or have the final answer, respond with your conclusion in plain text without calling any tools.
+
+Be concise and focused. Execute the minimum number of tool calls needed to accomplish the task.`
+
+// WithLLMProvider attaches an LLM provider for agent loop mode.
+func (e *EngineImpl) WithLLMProvider(provider llm.Provider, model string) *EngineImpl {
+	e.llmProvider = provider
+	e.llmModel = model
+	return e
+}
+
+// WithTools sets the tools available for the agent loop.
+func (e *EngineImpl) WithTools(tools []tool.Tool) *EngineImpl {
+	e.tools = tools
+	return e
+}
+
+// runAgentLoop executes the multi-turn tool-calling loop.
+func (e *EngineImpl) runAgentLoop(ctx context.Context, task *taskdsl.Task) (*taskdsl.Task, error) {
+	if err := e.transition(ctx, task, Planning); err != nil {
+		return task, err
+	}
+	if err := e.transition(ctx, task, Queued); err != nil {
+		return task, err
+	}
+	if err := e.transition(ctx, task, Running); err != nil {
+		return task, err
+	}
+
+	toolDefs := tool.BuildToolDefs(e.tools)
+	toolMap := make(map[string]tool.Tool, len(e.tools))
+	for _, t := range e.tools {
+		toolMap[t.Name()] = t
+	}
+
+	messages := []llm.Message{
+		{Role: "system", Content: agentSystemPrompt},
+		{Role: "user", Content: task.Prompt},
+	}
+
+	for i := 0; i < maxAgentLoopIterations; i++ {
+		resp, err := e.llmProvider.Chat(ctx, llm.Request{
+			Model:       e.llmModel,
+			Messages:    messages,
+			Temperature: 0.2,
+			Tools:       toolDefs,
+		})
+		if err != nil {
+			_ = e.transition(ctx, task, Failed)
+			return task, fmt.Errorf("agent loop iteration %d: %w", i, err)
+		}
+
+		_ = e.bus.Publish(ctx, "task.loop.iteration", &events.LoopIteration{
+			TaskID:    task.ID,
+			Iteration: i + 1,
+			ToolCalls: len(resp.ToolCalls),
+			Occurred:  time.Now(),
+		})
+
+		// No tool calls: LLM is done, this is the final answer.
+		if len(resp.ToolCalls) == 0 {
+			task.Result = resp.Content
+			task.UpdatedAt = time.Now()
+			_ = e.repo.Update(ctx, task)
+			_ = e.transition(ctx, task, Evaluating)
+			_ = e.transition(ctx, task, Succeeded)
+			return e.repo.Get(ctx, task.ID)
+		}
+
+		// Append assistant message with tool calls.
+		messages = append(messages, llm.Message{
+			Role:      "assistant",
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
+		})
+
+		// Execute each tool call and collect results.
+		for _, tc := range resp.ToolCalls {
+			actionID := fmt.Sprintf("loop-%d-%s", i+1, tc.ID)
+
+			_ = e.bus.Publish(ctx, "task.action.dispatched", &events.ActionDispatched{
+				TaskID:   task.ID,
+				ActionID: actionID,
+				Occurred: time.Now(),
+			})
+
+			t, ok := toolMap[tc.Name]
+			if !ok {
+				messages = append(messages, llm.Message{
+					Role:       "tool",
+					ToolCallID: tc.ID,
+					Content:    fmt.Sprintf("error: tool %q not found", tc.Name),
+				})
+				continue
+			}
+
+			var args map[string]any
+			if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
+				messages = append(messages, llm.Message{
+					Role:       "tool",
+					ToolCallID: tc.ID,
+					Content:    fmt.Sprintf("error: invalid arguments: %v", err),
+				})
+				continue
+			}
+
+			result, err := t.Run(ctx, args)
+			var resultStr string
+			if err != nil {
+				resultStr = fmt.Sprintf("error: %v", err)
+			} else {
+				resultBytes, _ := json.Marshal(result)
+				resultStr = string(resultBytes)
+			}
+
+			_ = e.bus.Publish(ctx, "task.action.completed", &events.ActionCompleted{
+				TaskID:   task.ID,
+				ActionID: actionID,
+				ExitCode: 0,
+				Stdout:   resultStr,
+				Occurred: time.Now(),
+			})
+
+			messages = append(messages, llm.Message{
+				Role:       "tool",
+				ToolCallID: tc.ID,
+				Content:    resultStr,
+			})
+		}
+	}
+
+	// Max iterations reached.
+	task.Result = "agent loop exceeded maximum iterations"
+	task.UpdatedAt = time.Now()
+	_ = e.repo.Update(ctx, task)
+	_ = e.transition(ctx, task, Failed)
+	return e.repo.Get(ctx, task.ID)
 }

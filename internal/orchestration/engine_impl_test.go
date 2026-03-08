@@ -7,12 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dongowu/agentos/internal/adapters/llm"
 	msgmemory "github.com/dongowu/agentos/internal/adapters/messaging/memory"
 	persmemory "github.com/dongowu/agentos/internal/adapters/persistence/memory"
 	"github.com/dongowu/agentos/internal/persistence"
 	"github.com/dongowu/agentos/internal/policy"
 	"github.com/dongowu/agentos/internal/runtimeclient"
 	"github.com/dongowu/agentos/internal/scheduler"
+	"github.com/dongowu/agentos/internal/tool"
 	"github.com/dongowu/agentos/pkg/taskdsl"
 )
 
@@ -448,5 +450,160 @@ func TestEngineImpl_DirectExecution_AppendsAuditRecord(t *testing.T) {
 	}
 	if record.Stdout != "done" || record.Stderr != "warn" {
 		t.Fatalf("unexpected audit outputs: %+v", record)
+	}
+}
+
+// --- mock LLM provider for agent loop ---
+
+type mockLLMProvider struct {
+	responses []llm.Response
+	calls     int
+	requests  []llm.Request
+}
+
+func (m *mockLLMProvider) Chat(_ context.Context, req llm.Request) (*llm.Response, error) {
+	m.requests = append(m.requests, req)
+	idx := m.calls
+	m.calls++
+	if idx >= len(m.responses) {
+		return &llm.Response{Content: "done"}, nil
+	}
+	return &m.responses[idx], nil
+}
+
+// --- mock tool for agent loop ---
+
+type mockTool struct {
+	name   string
+	desc   string
+	result any
+	err    error
+	calls  int
+}
+
+func (m *mockTool) Name() string        { return m.name }
+func (m *mockTool) Description() string { return m.desc }
+func (m *mockTool) Run(_ context.Context, _ map[string]any) (any, error) {
+	m.calls++
+	return m.result, m.err
+}
+func (m *mockTool) Schema() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{"cmd": map[string]any{"type": "string"}}}
+}
+
+func TestEngineImpl_AgentLoop_SingleToolCall(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &StubPlanner{}
+
+	provider := &mockLLMProvider{
+		responses: []llm.Response{
+			{ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "shell", Arguments: `{"cmd":"echo hi"}`}}},
+			{Content: "The command output: hi"},
+		},
+	}
+
+	shellTool := &mockTool{name: "shell", desc: "Execute commands", result: map[string]any{"stdout": "hi", "exit_code": 0}}
+
+	engine := NewEngineImpl(repo, bus, planner, nil, nil, nil, nil)
+	engine.WithLLMProvider(provider, "test-model")
+	engine.WithTools([]tool.Tool{shellTool})
+
+	ctx := context.Background()
+	task, err := engine.StartTask(ctx, "run echo hi")
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if task.State != string(Succeeded) {
+		t.Errorf("expected succeeded, got %s", task.State)
+	}
+	if task.Result != "The command output: hi" {
+		t.Errorf("expected result 'The command output: hi', got %q", task.Result)
+	}
+	if provider.calls != 2 {
+		t.Errorf("expected 2 LLM calls, got %d", provider.calls)
+	}
+	if shellTool.calls != 1 {
+		t.Errorf("expected 1 tool call, got %d", shellTool.calls)
+	}
+}
+
+func TestEngineImpl_AgentLoop_MaxIterations(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &StubPlanner{}
+
+	infiniteToolCall := llm.Response{
+		ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "shell", Arguments: `{"cmd":"echo loop"}`}},
+	}
+	responses := make([]llm.Response, 20)
+	for i := range responses {
+		responses[i] = infiniteToolCall
+	}
+	provider := &mockLLMProvider{responses: responses}
+
+	shellTool := &mockTool{name: "shell", desc: "Execute commands", result: map[string]any{"stdout": "loop", "exit_code": 0}}
+
+	engine := NewEngineImpl(repo, bus, planner, nil, nil, nil, nil)
+	engine.WithLLMProvider(provider, "test-model")
+	engine.WithTools([]tool.Tool{shellTool})
+
+	ctx := context.Background()
+	task, err := engine.StartTask(ctx, "infinite loop")
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if task.State != string(Failed) {
+		t.Errorf("expected failed, got %s", task.State)
+	}
+	if provider.calls != 10 {
+		t.Errorf("expected exactly 10 LLM calls (max iterations), got %d", provider.calls)
+	}
+}
+
+func TestEngineImpl_AgentLoop_NoToolCalls_ImmediateAnswer(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &StubPlanner{}
+
+	provider := &mockLLMProvider{
+		responses: []llm.Response{
+			{Content: "The answer is 42"},
+		},
+	}
+
+	engine := NewEngineImpl(repo, bus, planner, nil, nil, nil, nil)
+	engine.WithLLMProvider(provider, "test-model")
+
+	ctx := context.Background()
+	task, err := engine.StartTask(ctx, "what is the answer")
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if task.State != string(Succeeded) {
+		t.Errorf("expected succeeded, got %s", task.State)
+	}
+	if task.Result != "The answer is 42" {
+		t.Errorf("expected 'The answer is 42', got %q", task.Result)
+	}
+	if provider.calls != 1 {
+		t.Errorf("expected 1 LLM call, got %d", provider.calls)
+	}
+}
+
+func TestEngineImpl_AgentLoop_FallbackWithoutProvider(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &StubPlanner{}
+
+	engine := NewEngineImpl(repo, bus, planner, nil, nil, nil, nil)
+
+	ctx := context.Background()
+	task, err := engine.StartTask(ctx, "echo hello")
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if task.State != string(Queued) {
+		t.Errorf("expected queued (legacy path), got %s", task.State)
 	}
 }
