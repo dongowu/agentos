@@ -26,7 +26,7 @@ agentos/
 │   └── openapi/                   # OpenAPI 3.0（未来）
 │
 ├── cmd/
-│   ├── apiserver/                 # HTTP + WebSocket 入口
+│   ├── apiserver/                 # HTTP + SSE API 入口
 │   ├── controller/                # 编排循环、任务调度
 │   └── osctl/                     # CLI
 │

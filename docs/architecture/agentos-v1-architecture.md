@@ -1,12 +1,14 @@
 # AgentOS v1 Architecture
 
-> **定位**: AgentOS = Kubernetes for AI Agents  
-> **一句话**: AgentOS 是 Agent 基础设施（Agent Infrastructure）。
+> **状态说明**：这是一份较长的 v1 设计参考文档，包含目标态设计与部分历史思路；当前公开仓库的实时实现口径，请优先阅读 [Architecture Overview](overview.md)、[Getting Started](../guides/getting-started.md) 与 [Core Capabilities Reference](../reference/core-capabilities.md)。
+>
+> **当前定位**：AgentOS 是一个采用 Go 控制面与 Rust 运行时平面的开源 Agent 执行平台，公开仓库聚焦 community core，而不是完整终端聊天产品或成熟企业控制台。
 
-```
-LLM 不再直接调用工具
-而是运行在 AgentOS 上
-```
+## 阅读前说明
+
+- 这份文档适合看“为什么这样分层、目标态如何演进”
+- 这份文档**不是**当前 live API 的唯一权威来源
+- 遇到接口、能力边界、验收路径时，以 `README`、`docs/guides/`、`docs/reference/` 与 acceptance 文档为准
 
 ## 对标
 
@@ -15,7 +17,7 @@ LLM 不再直接调用工具
 | Kubernetes | container orchestration |
 | Ray | distributed compute |
 | LangChain | agent SDK / LLM workflow |
-| **AgentOS** | **Agent Infrastructure** |
+| **AgentOS** | **Agent Execution Platform** |
 
 ## AgentOS vs 市面框架
 
@@ -26,7 +28,7 @@ LLM 不再直接调用工具
 | CrewAI | agent orchestration |
 | OpenClaw | computer use |
 | HiClaw | CLI agent |
-| **AgentOS** | **Agent Infrastructure** |
+| **AgentOS** | **Agent Execution Platform** |
 
 ---
 
@@ -106,23 +108,26 @@ LLM 不再直接调用工具
 
 ## 一、Access System
 
-**职责**: API、CLI、UI、SDK、Auth。
+**职责**: API、CLI、Gateway、Auth，以及后续可能扩展的 UI / SDK 接入面。
 
 ### 入口
 
 - HTTP API
-- WebSocket
 - CLI (osctl)
+- Gateway routes
 - UI（未来）
-- SDK（Go、TypeScript、Python）
+- SDK（未来）
 
 ### 接口
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /tasks | 创建任务 |
-| GET | /tasks/{id} | 查询任务状态 |
-| GET | /tasks/{id}/stream | 流式输出 |
+| POST | /v1/tasks | 创建任务 |
+| GET | /v1/tasks/{id} | 查询任务状态 |
+| GET | /v1/tasks/{id}/stream | 任务级 SSE 遥测流 |
+| GET | /v1/tasks/{id}/audit | 查询任务 audit 记录 |
+| GET | /v1/tasks/{id}/replay | 查询任务 replay 记录 |
+| GET | /v1/audit | 平台级 audit feed |
 
 ### CLI
 
@@ -137,6 +142,12 @@ osctl tasks
 - `internal/access/` - API 实现
 - `cmd/apiserver` - HTTP 入口
 - `cmd/osctl` - CLI 入口
+
+### 备注
+
+- 当前仓库已经提供 task / action 级 SSE 流式接口
+- WebSocket 不是当前公开仓库的主线接口
+- 对外路径以 `/v1/*` 为主
 
 ---
 
@@ -539,7 +550,7 @@ osctl submit "echo hello"
 |------|------|
 | 开源 Runtime | Kubernetes |
 | SaaS Agent Platform | Zapier + AI |
-| 企业 Agent 平台 | Private Agent Infrastructure |
+| 企业 Agent 平台 | Private Agent Execution Platform |
 
 ---
 
