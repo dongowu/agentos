@@ -8,6 +8,7 @@
 
 - [项目 README](../README.md)
 - [中文 README](../README_CN.md)
+- [变更记录](../CHANGELOG.md)
 - [贡献指南](../CONTRIBUTING.md)
 - [社区支持说明](../SUPPORT.md)
 - [安全策略](../SECURITY.md)
@@ -43,8 +44,8 @@
 
 这些目录对贡献者和维护者有帮助，但不建议作为新读者的第一站：
 
-- `docs/plans/` — 实现计划、设计草稿、执行拆解
-- `docs/updates/` — 发布说明、项目更新、首发传播素材
+- [`plans/README.md`](plans/README.md) — 实现计划、设计草稿、执行拆解
+- [`updates/README.md`](updates/README.md) — 发布说明、项目更新、首发传播素材
 
 ## 按角色推荐阅读
 
@@ -67,4 +68,4 @@
 - [贡献指南](../CONTRIBUTING.md)
 - [社区支持说明](../SUPPORT.md)
 - [安全策略](../SECURITY.md)
-- `docs/plans/`
+- [`plans/README.md`](plans/README.md)

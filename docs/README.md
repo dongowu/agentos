@@ -8,6 +8,7 @@ If you are new to the repository, read these first:
 
 - [Project README](../README.md)
 - [Chinese README](../README_CN.md)
+- [Changelog](../CHANGELOG.md)
 - [Contributing Guide](../CONTRIBUTING.md)
 - [Support Guide](../SUPPORT.md)
 - [Security Policy](../SECURITY.md)
@@ -43,8 +44,8 @@ These documents explain what belongs in the open-source core:
 
 These folders are useful for contributors, but they are not the recommended first stop for new readers:
 
-- `docs/plans/` — implementation plans, design notes, and execution breakdowns
-- `docs/updates/` — release notes, project updates, and launch materials
+- [`plans/README.md`](plans/README.md) — implementation plans, design notes, and execution breakdowns
+- [`updates/README.md`](updates/README.md) — release notes, project updates, and launch materials
 
 ## Suggested Reading By Audience
 
@@ -67,4 +68,4 @@ These folders are useful for contributors, but they are not the recommended firs
 - [Contributing Guide](../CONTRIBUTING.md)
 - [Support Guide](../SUPPORT.md)
 - [Security Policy](../SECURITY.md)
-- `docs/plans/`
+- [`plans/README.md`](plans/README.md)

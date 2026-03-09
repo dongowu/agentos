@@ -348,6 +348,7 @@ For the public repository, the focus is the **Community** core: the self-hosted 
 ## Documentation
 
 - [Documentation Guide](docs/README.md)
+- [Changelog](CHANGELOG.md)
 - [Architecture Overview](docs/architecture/overview.md)
 - [Multiprocess Acceptance](docs/architecture/multiprocess-acceptance.md)
 - [Licensing Decision](docs/strategy/licensing-decision.md)
