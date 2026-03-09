@@ -1,93 +1,61 @@
 # AgentOS
 
-**AgentOS = AI Agent 的 Kubernetes**
+采用 Go 控制面与 Rust 运行时平面的开源 Agent 执行平台。
 
-一个开源的 Agent 执行平台，采用 Go 控制面 + Rust 运行时架构。LLM 不再直接调用工具 — 它们运行在 AgentOS 上。
+AgentOS 的目标，是让团队把 Agent 当作可治理工作负载来运行，而不是停留在临时脚本和 prompt demo。
 
-安全。可控。可扩展。分布式。
+## AgentOS 是什么
+
+当前公开仓库聚焦在 **Community 核心**：
+
+- 可 self-host 的控制面与 worker runtime
+- 任务编排与执行生命周期
+- 本地调度与 NATS 调度路径
+- audit、replay 与 SSE telemetry API
+- agent loop / tool-calling 能力
+- tools、skills、adapters 等扩展接口
+
+## 适合谁
+
+AgentOS 当前更适合以下团队：
+
+- 构建内部 Agent 平台的平台 / 基础设施团队
+- 运行研发自动化或开发者工具链的工程效率团队
+- 对审计、调度、执行控制有要求的运维与流程自动化团队
+- 想要 self-host 执行底座，而不是聊天外壳的开发者
+
+当前项目 **并不** 以“完整终端聊天产品”或“成熟企业控制台”作为主要定位。
 
 ## 为什么需要 AgentOS
 
-当前的 Agent 框架（LangChain、AutoGPT、CrewAI）本质是应用层胶水代码，存在四个致命缺陷：
+很多 Agent 项目擅长 prompt 和 demo，但在执行基础设施层仍然薄弱。
 
-| 问题 | AgentOS 解决方案 |
-|------|-----------------|
-| **不安全** — AI 生成的代码直接在宿主机运行 | Rust 沙箱 + Docker/gVisor 隔离、环境隔离、秘钥脱敏 |
-| **不可扩展** — 工具生态碎片化，缺乏统一标准 | 插拔式 Tool 接口、7 个内置工具、OpenClaw 生态兼容 |
-| **不可观测** — 执行过程是黑盒 | 事件驱动审计链路、遥测流、策略日志 |
-| **非生产就绪** — 只能单机跑 Demo | NATS 分布式调度、多 Worker 池、自动扩缩容 |
-
-## 系统架构
-
-```
-            [ 客户端 (CLI / API / UI / SDK) ]
-                          |
-  +-----------------------v-----------------------+
-  |              接入层 (Go)                       |
-  |        HTTP 网关 + CLI + 认证                  |
-  +-----------------------+-----------------------+
-                          |
-  +-----------------------v-----------------------+
-  |            编排核心 (Go)                       |
-  |                                               |
-  |  [LLM Planner]  [Task Engine]  [Scheduler]   |
-  |  [Skill Resolver]  [Policy Engine]            |
-  +-----------------------+-----------------------+
-                          |
-  +-----------------------v-----------------------+
-  |        Worker 池 + 注册中心 (Go)               |
-  |  [Registry]  [Health Monitor]  [Pool]         |
-  +-----------------------+-----------------------+
-                          |
-  +-----------------------v-----------------------+
-  |          执行 Worker (Rust)                    |
-  |                                               |
-  |  [RuntimeAdapter]  [SecurityPolicy]           |
-  |  [ActionExecutor]  [Registration]             |
-  +-----------------------+-----------------------+
-                          |
-  +-----------------------v-----------------------+
-  |             执行沙箱                           |
-  |     [Native]    [Docker]    [WASM (未来)]      |
-  +-----------+-----------------------------------+
-              |
-  +-----------v-----------------------------------+
-  |             工具生态                           |
-  |  shell / file / git / http / browser (未来)    |
-  +-----------------------------------------------+
-```
-
-## 六大核心系统
-
-| 系统 | 职责 | 状态 |
-|------|------|------|
-| **Access 接入层** | HTTP API、CLI、网关 | 已实现 |
-| **Agent Brain 智脑层** | LLM Planner（OpenAI 兼容）、Agent YAML DSL | 已实现 |
-| **Task Engine 任务引擎** | 状态机、生命周期流转 | 已实现 |
-| **Skill System 技能系统** | Tool 注册表、7 个内置工具、SchemaAware、面向 file/http 类 action 的执行桥接 | 已实现 |
-| **Policy Engine 策略引擎** | 允许/拒绝规则、自治级别、凭证隔离 | 已实现 |
-| **Runtime 运行时** | Rust Worker、NativeRuntime、DockerRuntime、SecurityPolicy | 已实现 |
-| **Scheduler 调度器** | Worker 注册、健康监测、NATS 队列、Worker 池 | 已实现 |
-| **Audit 审计存储** | 平台级持久化 task/action 审计记录 | 已实现 |
-| **Memory 记忆系统** | 内存 + Redis 提供者、TTL 支持 | 已实现 |
+| 需求 | AgentOS 提供什么 |
+|------|------------------|
+| 安全执行 | Rust worker runtime、沙箱路径、policy hook、secret 隔离 |
+| 运维控制 | task lifecycle、调度、worker registry、可回放执行记录 |
+| 可观测性 | audit trail、SSE telemetry、action output 流 |
+| 可扩展性 | tools、skills、adapters、control-plane bridge |
+| 自部署能力 | 可在自有环境中运行的 community core |
 
 ## 快速开始
 
+按你的目标选择一条路径即可。
+
+### 1. 最快的本地验证路径
+
 ```bash
-# 终端 1：启动 Rust Worker
+# Terminal 1: 启动 Rust worker
 cd runtime && cargo run -p agentos-worker
 
-# 终端 2：提交任务
+# Terminal 2: 通过本地控制路径提交任务
 export AGENTOS_MODE=dev AGENTOS_WORKER_ADDR=localhost:50051
 go run ./cmd/osctl submit "echo hello"
-# 输出: task task-xxx created (state: succeeded)
 ```
 
-当设置 `AGENTOS_WORKER_ADDR` 时，上面的直连 Worker 流程是 `osctl` 和 `apiserver` 当前支持的本地运行方式。此时如果本地调度器没有可用 worker，控制面会回退到该直连 worker 地址执行。
+这条路径最适合快速确认执行底座本身能跑通。
 
-`controller` 仍然用于 worker 注册和健康监测，但它属于另一条多进程运行路径，不是上面这个本地快速开始的必需项。
-
-接入真实 LLM：
+### 2. 开启 LLM 规划的本地路径
 
 ```bash
 export AGENTOS_MODE=dev \
@@ -96,49 +64,51 @@ export AGENTOS_MODE=dev \
        AGENTOS_LLM_API_KEY=sk-xxx \
        AGENTOS_LLM_BASE_URL=https://api.openai.com \
        AGENTOS_LLM_MODEL=gpt-4o
-go run ./cmd/osctl submit "创建一个 hello world Python 脚本"
+go run ./cmd/osctl submit "create a hello world python script"
 ```
 
-Planner 后端现在通过注册表解析。当前内置 `openai`，后续接入其他 OpenAI 兼容或新 provider 时，不需要再修改 bootstrap 主链路。
+这条路径会在相同执行底座之上启用 LLM planner / agent loop 能力。
 
-如果要让 `osctl` 走远端 API：
-
-```bash
-export AGENTOS_AUTH_TOKEN=acceptance-token
-go run ./cmd/osctl --server http://localhost:8080 submit "echo hello"
-go run ./cmd/osctl --server http://localhost:8080 --token acceptance-token status task-123
-```
-
-当设置 `--server`（或 `AGENTOS_SERVER_URL`）后，`osctl` 不再本地 bootstrap，而是直接调用远端 `/v1/tasks` API；`--token` 默认读取 `AGENTOS_AUTH_TOKEN`。如果不设置 `--server`，则继续保持现有的本地嵌入式模式。
-
-如果你是本地迭代 agent，可以直接使用 gateway CLI：
-
-```bash
-claw --server http://localhost:8080 dev
-claw --server http://localhost:8080 dev agents/demo.yaml "echo hello"
-
-# 如果 gateway 启用了鉴权
-export AGENTOS_AUTH_TOKEN=acceptance-token
-claw --server http://localhost:8080 dev
-claw --server http://localhost:8080 run agents/demo.yaml "echo hello"
-claw --server http://localhost:8080 --token acceptance-token status task-123
-```
-
-不带参数时会检查 `/health` 和 `/agent/list`；带上 `agent.yaml + task` 时会加载本地 agent 配置并通过 `/agent/run` 发起任务。如果 gateway 启用了 Bearer 鉴权，`claw-cli` 支持 `--token` 或 `AGENTOS_AUTH_TOKEN`。
-
-HTTP 网关当前暴露 `/health`、`/agent/run`、`/agent/status`、`/agent/list`、`/tool/run`、用于平台级审计查询的 `GET /v1/audit`、用于任务级 SSE 遥测的 `GET /v1/tasks/{task_id}/stream`、用于动作实时 stdout/stderr 流的 `GET /v1/tasks/{task_id}/actions/{action_id}/stream`、用于任务审计记录查询的 `GET /v1/tasks/{task_id}/audit`、用于单个 action 审计记录查询的 `GET /v1/tasks/{task_id}/actions/{action_id}/audit`，以及用于任务级回放投影的 `GET /v1/tasks/{task_id}/replay`（聚合 task 元数据、计划动作与持久化 audit 结果）。当启用 Bearer 鉴权后，`/v1/tasks*` 与 gateway 路由都会统一要求 `Authorization: Bearer ...` 请求头。对于 `/agent/run`，控制面现在会保留 `agent_name`，并让已加载的 agent 配置参与 planner prompt 组装，而不再只是透传原始 task 文本。
-
-现在任务遥测会包含实时 `task.action.output` chunk 事件；Native 与 Docker runtime 都支持增量流式输出。当 action 完成后，audit store 会持久化最终 command、exit code、worker id、stdout、stderr，因此动作流接口可以回放已完成动作的结果快照，任务流接口也会在已结束任务上补发持久化的 action output / completed 事件，`/v1/audit` 则能提供按租户收敛的平台级审计 feed；不过这仍然是 API 级审计中心能力，还不是完整的控制台 UI。
-
-LLM planner 现在把“格式错误的计划”视为可恢复路径：先请求 provider 对坏 JSON 做一次修复；如果修复仍失败，则返回 `ErrMalformedPlan`，并让外层 fallback planner 直接切回 `PromptPlanner`，而不是在非瞬时错误上继续浪费重试次数。
-
-现在 tool-like action 不再必须先退化成 shell 命令才能运行。`file.read`、`file.write`、直接 tool kind，以及 `http.request`（当前桥接到 `http.get` / `http.post`）可以通过 Go 控制面的 tool bridge 执行；`command.exec` 仍走 Rust worker。浏览器类专用执行仍是后续缺口。
-
-如果要跑真实三进程验收（`controller + apiserver + worker`，覆盖共享注册、Bearer 鉴权、多步执行与 audit 闭环），可直接执行：
+### 3. 完整多进程验收
 
 ```bash
 ./scripts/acceptance.sh
 ```
+
+这会验证真实的 `controller + apiserver + worker` 链路，包括鉴权、调度、审计、回放，以及 control-plane bridge 行为。
+
+## 架构概览
+
+```text
+Clients (CLI / API / SDK)
+  -> Access Layer (Go)
+  -> Orchestration Core (Go)
+  -> Scheduler / Worker Registry (Go)
+  -> Execution Workers (Rust)
+  -> Sandbox / Tool Surfaces
+```
+
+高层看，系统由几部分组成：
+
+- `apiserver` 提供 HTTP、audit、replay 与 SSE telemetry API
+- `controller` 负责共享 worker 注册和控制面协调
+- orchestration core 管理 task state、planning、policy 与 dispatch
+- workers 通过 native 或 container-backed runtime 执行动作
+- 部分 tool-like action 也可以直接通过 Go 控制面的 bridge 执行
+
+## 核心系统
+
+| 系统 | 职责 | 状态 |
+|------|------|------|
+| **Access** | HTTP API、CLI、Gateway | 已实现 |
+| **Agent Brain** | 注册表驱动的 LLM Planner（OpenAI-compatible）、Agent YAML DSL | 已实现 |
+| **Task Engine** | 状态机、生命周期迁移 | 已实现 |
+| **Skill System** | Tool registry、内置工具、SchemaAware、file/http 类 action bridge | 已实现 |
+| **Policy Engine** | allow/deny 规则、自主级别、凭证隔离 | 已实现 |
+| **Runtime** | Rust Worker、NativeRuntime、DockerRuntime、SecurityPolicy | 已实现 |
+| **Scheduler** | Worker registry、health monitor、NATS queue、worker pool | 已实现 |
+| **Audit** | 平台级 audit store、持久化 task/action 记录 | 已实现 |
+| **Memory** | In-memory + Redis provider、TTL 支持 | 已实现 |
 
 ## Agent DSL
 

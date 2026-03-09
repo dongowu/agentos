@@ -1,93 +1,61 @@
 # AgentOS
 
-**AgentOS = Kubernetes for AI Agents**
+Open-source agent execution platform with a Go control plane and a Rust runtime plane.
 
-An open-source agent execution platform with a Go control plane and a Rust runtime plane. LLMs no longer call tools directly — they run on AgentOS.
+AgentOS helps teams run agents as governed workloads instead of ad-hoc scripts and isolated demos.
 
-Safe. Controllable. Extensible. Distributed.
+## What AgentOS Is
+
+The public repository focuses on the **community core**:
+
+- self-hosted control plane and worker runtime
+- task orchestration and execution lifecycle
+- local and NATS-backed scheduling paths
+- audit, replay, and SSE telemetry APIs
+- agent loop / tool-calling support
+- extension points for tools, skills, and adapters
+
+## Who It's For
+
+AgentOS is best suited for:
+
+- platform and infrastructure teams building internal agent platforms
+- engineering productivity teams running developer-facing automation
+- operations and workflow automation teams that need audit and execution control
+- builders who want a self-hosted execution substrate rather than a chat-first app shell
+
+AgentOS is **not** currently positioned as a polished end-user chat product or a complete enterprise console.
 
 ## Why AgentOS
 
-Current Agent frameworks (LangChain, AutoGPT, CrewAI) are application-layer glue code. They suffer from four critical gaps:
+Most agent projects are good at prompts and demos, but weak at execution infrastructure.
 
-| Problem | AgentOS Solution |
-|---------|-----------------|
-| **Insecure** — AI-generated code runs with host privileges | Rust sandbox with Docker/gVisor isolation, env isolation, secret redaction |
-| **Unscalable** — Fragmented tool ecosystems, no standard ABI | Pluggable Tool interface, 7 built-in tools, OpenClaw skill compatibility |
-| **Unobservable** — Execution is a black box | Event-driven audit trail, telemetry streaming, policy logging |
-| **Not production-ready** — Single-machine demos only | NATS-based distributed scheduling, multi-worker pool, auto-scaling |
-
-## Architecture
-
-```
-            [ Client (CLI / API / UI / SDK) ]
-                          |
-  +-----------------------v-----------------------+
-  |              Access Layer (Go)                |
-  |        HTTP Gateway + CLI + Auth              |
-  +-----------------------+-----------------------+
-                          |
-  +-----------------------v-----------------------+
-  |          Orchestration Core (Go)              |
-  |                                               |
-  |  [LLM Planner]  [Task Engine]  [Scheduler]   |
-  |  [Skill Resolver]  [Policy Engine]            |
-  +-----------------------+-----------------------+
-                          |
-  +-----------------------v-----------------------+
-  |         Worker Pool + Registry (Go)           |
-  |  [Registry]  [Health Monitor]  [Pool]         |
-  +-----------------------+-----------------------+
-                          |
-  +-----------------------v-----------------------+
-  |         Execution Workers (Rust)              |
-  |                                               |
-  |  [RuntimeAdapter]  [SecurityPolicy]           |
-  |  [ActionExecutor]  [Registration]             |
-  +-----------------------+-----------------------+
-                          |
-  +-----------------------v-----------------------+
-  |           Execution Sandbox                   |
-  |     [Native]    [Docker]    [WASM (future)]   |
-  +-----------+-----------------------------------+
-              |
-  +-----------v-----------------------------------+
-  |            Tools Ecosystem                    |
-  |  shell / file / git / http / browser (future) |
-  +-----------------------------------------------+
-```
-
-## Core Systems
-
-| System | Responsibility | Status |
-|--------|---------------|--------|
-| **Access** | HTTP API, CLI, Gateway | Implemented |
-| **Agent Brain** | Registry-backed LLM Planner (OpenAI-compatible), Agent YAML DSL | Implemented |
-| **Task Engine** | State machine, lifecycle transitions | Implemented |
-| **Skill System** | Tool registry, 7 built-in tools, SchemaAware, action bridge for file/http-style actions | Implemented |
-| **Policy Engine** | Allow/deny rules, autonomy levels, credential isolation | Implemented |
-| **Runtime** | Rust Worker, NativeRuntime, DockerRuntime, SecurityPolicy | Implemented |
-| **Scheduler** | Worker registry, health monitor, NATS queue, worker pool | Implemented |
-| **Audit** | Platform audit store with persistent task/action records | Implemented |
-| **Memory** | In-memory + Redis providers, TTL support | Implemented |
+| Need | What AgentOS Provides |
+|------|-----------------------|
+| Safe execution | Rust worker runtime, sandboxing paths, policy hooks, secret isolation |
+| Operational control | task lifecycle, scheduling, worker registry, replayable execution records |
+| Observability | audit trail, SSE telemetry, action output streaming |
+| Extensibility | tools, skills, adapters, and control-plane bridge surfaces |
+| Self-hosting | community core that teams can run in their own environment |
 
 ## Quick Start
 
+Choose the path that matches your goal.
+
+### 1. Fastest local run
+
 ```bash
-# Terminal 1: Start the Rust worker
+# Terminal 1: start the Rust worker
 cd runtime && cargo run -p agentos-worker
 
-# Terminal 2: Submit a task
+# Terminal 2: submit a task through the local control path
 export AGENTOS_MODE=dev AGENTOS_WORKER_ADDR=localhost:50051
 go run ./cmd/osctl submit "echo hello"
-# Output: task task-xxx created (state: succeeded)
 ```
 
-This direct-worker flow is the supported local path for `osctl` and `apiserver` when `AGENTOS_WORKER_ADDR` is set. In this mode, the control plane falls back to the configured worker address if no local scheduler worker is available.
+This is the fastest way to verify the execution substrate locally.
 
-`controller` is still useful for worker registration and health monitoring, but it is a separate multi-process path from the direct local quick start above.
-
-With LLM planning:
+### 2. Local run with LLM planning
 
 ```bash
 export AGENTOS_MODE=dev \
@@ -99,46 +67,48 @@ export AGENTOS_MODE=dev \
 go run ./cmd/osctl submit "create a hello world python script"
 ```
 
-The planner backend is registry-driven. `openai` is built in, and other OpenAI-compatible or future providers can be added through the same adapter registry without changing bootstrap wiring.
+This enables the LLM-backed planner / agent loop path on top of the same execution substrate.
 
-For remote API usage with `osctl`:
-
-```bash
-export AGENTOS_AUTH_TOKEN=acceptance-token
-go run ./cmd/osctl --server http://localhost:8080 submit "echo hello"
-go run ./cmd/osctl --server http://localhost:8080 --token acceptance-token status task-123
-```
-
-When `--server` (or `AGENTOS_SERVER_URL`) is set, `osctl` skips local bootstrap and talks to the remote `/v1/tasks` API directly. `--token` defaults from `AGENTOS_AUTH_TOKEN`. Leaving `--server` empty keeps the existing embedded local mode.
-
-For local agent iteration with the gateway CLI:
-
-```bash
-claw --server http://localhost:8080 dev
-claw --server http://localhost:8080 dev agents/demo.yaml "echo hello"
-
-# against an authenticated gateway
-export AGENTOS_AUTH_TOKEN=acceptance-token
-claw --server http://localhost:8080 dev
-claw --server http://localhost:8080 run agents/demo.yaml "echo hello"
-claw --server http://localhost:8080 --token acceptance-token status task-123
-```
-
-The zero-arg form checks `/health` and `/agent/list`; the two-arg form loads the local `agent.yaml` and submits it through `/agent/run`. When the gateway requires Bearer auth, `claw-cli` accepts `--token` or `AGENTOS_AUTH_TOKEN`.
-
-The HTTP gateway exposes `/health`, `/agent/run`, `/agent/status`, `/agent/list`, `/tool/run`, `GET /v1/audit` for a platform-level audit feed API, `GET /v1/tasks/{task_id}/stream` for task-level SSE telemetry, `GET /v1/tasks/{task_id}/actions/{action_id}/stream` for live action stdout/stderr streaming, `GET /v1/tasks/{task_id}/audit` for task audit history, `GET /v1/tasks/{task_id}/actions/{action_id}/audit` for a single persisted action audit record, and `GET /v1/tasks/{task_id}/replay` for a task-centric replay projection that joins task metadata, planned actions, and persisted audit results. When bearer auth is configured, both `/v1/tasks*` and gateway routes require the same `Authorization: Bearer ...` header. For `/agent/run`, the control plane now preserves `agent_name` and lets the loaded agent profile shape the planner prompt instead of forwarding only the raw task text.
-
-Task telemetry now includes live `task.action.output` chunk events. Native and Docker runtimes both support incremental stream delivery. Once an action finishes, the audit store persists the final command, exit code, worker id, stdout, and stderr so the action stream can replay a completed run snapshot, the task stream can backfill persisted action output/completion events for already-finished runs, `/v1/audit` can expose a tenant-scoped global audit feed, and the audit/replay endpoints can serve durable execution records. This is an API-level audit center surface, not yet a full console UI.
-
-The LLM planner now treats malformed plan output as a structured recovery path: it first asks the provider to repair the bad JSON once, returns `ErrMalformedPlan` if repair still fails, and lets the outer fallback planner hand execution to `PromptPlanner` instead of burning more retries on non-transient output errors.
-
-Tool-like actions no longer need to be downgraded into shell commands to run. `file.read`, `file.write`, direct tool kinds, and `http.request` (currently bridged to `http.get` / `http.post`) can execute through the Go control-plane tool bridge, while `command.exec` still goes through the Rust worker. Browser-specialized execution is still a future gap.
-
-For a real three-process acceptance run (`controller + apiserver + worker`) including audit verification, use:
+### 3. Full multiprocess acceptance
 
 ```bash
 ./scripts/acceptance.sh
 ```
+
+This validates the real `controller + apiserver + worker` flow, including auth, scheduling, audit, replay, and control-plane bridge behavior.
+
+## Architecture
+
+```text
+Clients (CLI / API / SDK)
+  -> Access Layer (Go)
+  -> Orchestration Core (Go)
+  -> Scheduler / Worker Registry (Go)
+  -> Execution Workers (Rust)
+  -> Sandbox / Tool Surfaces
+```
+
+At a high level:
+
+- `apiserver` exposes HTTP, audit, replay, and SSE telemetry APIs
+- `controller` handles shared worker registration and control-plane coordination
+- the orchestration core manages task state, planning, policy, and dispatch
+- workers execute actions through native or container-backed runtime paths
+- tool-like actions can also run through the Go control-plane bridge when appropriate
+
+## Core Systems
+
+| System | Responsibility | Status |
+|--------|---------------|--------|
+| **Access** | HTTP API, CLI, Gateway | Implemented |
+| **Agent Brain** | Registry-backed LLM Planner (OpenAI-compatible), Agent YAML DSL | Implemented |
+| **Task Engine** | State machine, lifecycle transitions | Implemented |
+| **Skill System** | Tool registry, built-in tools, SchemaAware, action bridge for file/http-style actions | Implemented |
+| **Policy Engine** | Allow/deny rules, autonomy levels, credential isolation | Implemented |
+| **Runtime** | Rust Worker, NativeRuntime, DockerRuntime, SecurityPolicy | Implemented |
+| **Scheduler** | Worker registry, health monitor, NATS queue, worker pool | Implemented |
+| **Audit** | Platform audit store with persistent task/action records | Implemented |
+| **Memory** | In-memory + Redis providers, TTL support | Implemented |
 
 ## Agent DSL
 
