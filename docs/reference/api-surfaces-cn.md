@@ -51,6 +51,7 @@ Authorization: Bearer <token>
 | 方法 | 路径 | 用途 |
 |------|------|------|
 | `POST` | `/v1/tasks` | 创建任务 |
+| `GET` | `/v1/agents` | 列出当前已加载的 agent profile |
 | `GET` | `/v1/tasks/{task_id}` | 获取任务状态 |
 | `GET` | `/v1/tasks/{task_id}/audit` | 获取任务级持久化审计记录 |
 | `GET` | `/v1/tasks/{task_id}/actions/{action_id}/audit` | 获取单个 action 审计记录 |
@@ -58,6 +59,7 @@ Authorization: Bearer <token>
 | `GET` | `/v1/tasks/{task_id}/stream` | 任务级 SSE 遥测流 |
 | `GET` | `/v1/tasks/{task_id}/actions/{action_id}/stream` | 动作级 SSE 遥测流 |
 | `GET` | `/v1/audit` | 查询平台级审计流 |
+| `GET` | `/v1/workers` | 列出当前已注册的 worker 节点 |
 
 ### `POST /v1/tasks`
 
@@ -99,6 +101,29 @@ Authorization: Bearer <token>
 ```json
 {"error":"tenant mismatch"}
 ```
+
+### `GET /v1/agents`
+
+成功响应结构：
+
+```json
+{
+  "agents": [
+    {
+      "name": "ops-agent",
+      "description": "Handles routine operator tasks",
+      "model": "gpt-4.1",
+      "tools": ["bash", "file.read"],
+      "workflow": ["plan", "execute"]
+    }
+  ]
+}
+```
+
+说明：
+
+- 返回当前控制面进程里已加载的 agent profile
+- 这是只读的运维 / 开发者视图，不会修改 agent 运行时状态
 
 ### `GET /v1/tasks/{task_id}`
 
@@ -201,6 +226,31 @@ Authorization: Bearer <token>
   ]
 }
 ```
+
+### `GET /v1/workers`
+
+成功响应结构：
+
+```json
+{
+  "workers": [
+    {
+      "id": "worker-1",
+      "addr": "127.0.0.1:9001",
+      "capabilities": ["docker", "native"],
+      "status": "online",
+      "last_heartbeat": "2026-03-09T00:00:00Z",
+      "active_tasks": 1,
+      "max_tasks": 4
+    }
+  ]
+}
+```
+
+说明：
+
+- 返回当前控制面 registry 中已注册的 worker 节点
+- `last_heartbeat` 是 Go 默认 JSON 时间编码输出的 RFC3339 时间戳
 
 ## Gateway API
 
