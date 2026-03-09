@@ -1,6 +1,6 @@
 # AgentOS 文档导航
 
-这是 AgentOS 仓库文档的总入口页。
+这是 AgentOS 仓库文档的主入口页。
 
 ## 从这里开始
 
@@ -8,6 +8,8 @@
 
 - [项目 README](../README.md)
 - [中文 README](../README_CN.md)
+- [快速上手](guides/getting-started-cn.md)
+- [核心能力参考](reference/core-capabilities-cn.md)
 - [变更记录](../CHANGELOG.md)
 - [贡献指南](../CONTRIBUTING.md)
 - [社区支持说明](../SUPPORT.md)
@@ -17,16 +19,29 @@
 
 如果你想快速理解项目，建议按这个顺序阅读：
 
-1. [架构概览](architecture/overview.md)
-2. [AgentOS v1 架构](architecture/agentos-v1-architecture.md)
-3. [Monorepo 结构](architecture/monorepo-structure.md)
-4. [平台层与能力层边界](architecture/platform-vs-capability-boundary.md)
-5. [多进程验收说明](architecture/multiprocess-acceptance.md)
+1. [项目 README](../README.md)
+2. [快速上手](guides/getting-started-cn.md)
+3. [核心能力参考](reference/core-capabilities-cn.md)
+4. [架构概览](architecture/overview.md)
+5. [AgentOS v1 架构](architecture/agentos-v1-architecture.md)
+6. [多进程验收说明](architecture/multiprocess-acceptance.md)
+
+## 指南
+
+- [快速上手](guides/getting-started-cn.md)
+
+## 参考
+
+- [核心能力参考](reference/core-capabilities-cn.md)
 
 ## 架构参考文档
 
 以下文档适合在理解整体之后按专题深入：
 
+- [架构概览](architecture/overview.md)
+- [AgentOS v1 架构](architecture/agentos-v1-architecture.md)
+- [Monorepo 结构](architecture/monorepo-structure.md)
+- [平台层与能力层边界](architecture/platform-vs-capability-boundary.md)
 - [可插拔适配器](architecture/adapters.md)
 - [技能系统](architecture/skill-system.md)
 - [策略引擎](architecture/policy-engine.md)
@@ -52,9 +67,9 @@
 ### 面向开发者
 
 - [项目 README](../README.md)
+- [快速上手](guides/getting-started-cn.md)
+- [核心能力参考](reference/core-capabilities-cn.md)
 - [架构概览](architecture/overview.md)
-- [Monorepo 结构](architecture/monorepo-structure.md)
-- [技能系统](architecture/skill-system.md)
 
 ### 面向平台 / 基础设施团队
 

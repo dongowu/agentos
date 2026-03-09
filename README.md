@@ -110,224 +110,31 @@ At a high level:
 | **Audit** | Platform audit store with persistent task/action records | Implemented |
 | **Memory** | In-memory + Redis providers, TTL support | Implemented |
 
-## Agent DSL
+## Deeper Reading
 
-Agents are config, not code:
+If you want details beyond the homepage, start here:
 
-```yaml
-name: defi-trading-agent
-description: "Monitors markets and executes trades."
-model: gpt-4o
-
-memory:
-  type: redis
-  ttl: 86400
-
-tools:
-  - http.get
-  - http.post
-  - shell
-
-policy:
-  allow: ["http.*"]
-  deny: ["shell"]
-
-workflow:
-  - plan
-  - execute
-  - reflect
-```
-
-## Built-in Tools
-
-| Tool | Description |
-|------|------------|
-| `shell` | Execute shell commands (with sandbox) |
-| `file.read` | Read file contents |
-| `file.write` | Write files (auto-creates dirs) |
-| `git.clone` | Clone git repositories |
-| `git.status` | Get git status |
-| `http.get` | HTTP GET requests |
-| `http.post` | HTTP POST requests |
-
-## Repository Layout
-
-```
-agentos/
-├── api/
-│   ├── proto/agentos/v1/          # Protobuf contracts (Go <-> Rust)
-│   └── gen/                       # Generated Go gRPC code
-├── cmd/
-│   ├── apiserver/                 # HTTP + SSE API server
-│   ├── controller/                # Orchestration loop
-│   ├── claw-cli/                  # ClawOS CLI
-│   └── osctl/                     # Developer CLI
-├── internal/
-│   ├── access/                    # HTTP handlers, CLI wiring, auth
-│   ├── adapters/
-│   │   ├── llm/openai/            # OpenAI-compatible LLM adapter
-│   │   ├── memory/{inmemory,redis}/ # Memory providers
-│   │   ├── messaging/{memory,nats}/ # EventBus adapters
-│   │   ├── persistence/{memory,postgres}/ # TaskRepository adapters
-│   │   └── runtimeclient/         # gRPC executor client
-│   ├── agent/                     # Agent YAML DSL, runtime, manager
-│   ├── bootstrap/                 # Dependency wiring from config
-│   ├── gateway/                   # HTTP API (/agent/run, /tool/run)
-│   ├── memory/                    # Memory interface + builder factory
-│   ├── orchestration/             # TaskEngine, Planner, StateMachine
-│   ├── policy/                    # PolicyEngine, rules, credential vault
-│   ├── scheduler/                 # Local + NATS task schedulers
-│   ├── tool/builtin/              # 7 built-in tools (shell,file,git,http)
-│   └── worker/                    # Registry, health monitor, pool
-├── pkg/
-│   ├── config/                    # All system configuration
-│   ├── events/                    # Domain events
-│   └── taskdsl/                   # Task, Plan, Action types
-├── runtime/
-│   └── crates/
-│       ├── worker/                # Rust gRPC worker + executor
-│       ├── sandbox/               # RuntimeAdapter, NativeRuntime, DockerRuntime
-│       └── telemetry/             # Streaming telemetry models
-├── deploy/                        # Docker Compose (NATS + Postgres)
-└── examples/
-    ├── agents/                    # Example agent YAML configs
-    └── basic-task/
-```
-
-## Pluggable Adapters
-
-| Interface | Adapters | Default |
-|-----------|----------|---------|
-| `EventBus` | memory, nats | nats (prod) / memory (dev) |
-| `TaskRepository` | memory, postgres | postgres (prod) / memory (dev) |
-| `AuditLogStore` | memory, postgres | postgres (prod) / memory (dev) |
-| `Planner` | prompt, registry-backed LLM providers (`openai` built in) | prompt planner baseline; LLM planner does bounded retry for transient failures, one repair pass for malformed JSON, then falls back to `PromptPlanner` |
-| `Memory.Provider` | inmemory, redis | inmemory |
-| `RuntimeAdapter` (Rust) | native, docker | native |
-| `Scheduler` | local, nats | nats (prod) / local (dev) |
-
-```go
-app, err := bootstrap.FromEnv(ctx)
-// AGENTOS_MODE=dev  -> memory adapters + local scheduler + prompt planner
-// AGENTOS_MODE=prod -> nats + postgres + nats scheduler + registry-backed LLM planner when configured
-```
-
-## Security Model
-
-**Go Control Plane (inspired by HiClaw):**
-- PolicyEngine: allow/deny rules with glob matching, deny-takes-precedence
-- AutonomyLevel: Supervised / SemiAutonomous / Autonomous
-- CredentialVault: workers get opaque tokens, real secrets only in gateway
-- Rate limiting per agent (actions/hour)
-- Dangerous command blacklist (rm -rf, dd, mkfs, etc.)
-
-**Rust Worker (inspired by ZeroClaw):**
-- SecurityPolicy: command whitelist/blacklist, forbidden paths
-- Environment isolation: clear env, re-add only safe vars
-- Secret redaction: detects API keys, Bearer tokens, AWS keys in output
-- Output truncation: configurable max bytes (default 1MB)
-- Timeout enforcement per action
-- Docker isolation: --read-only, --network none, resource limits
-
-## Distributed Architecture
-
-```
-                    ┌─────────────────┐
-                    │   Go Control    │
-                    │     Plane       │
-                    │                 │
-                    │  ┌───────────┐  │
-                    │  │ Scheduler │  │
-                    │  └─────┬─────┘  │
-                    │        │        │
-                    │  ┌─────▼─────┐  │
-                    │  │  Worker   │  │
-                    │  │ Registry  │  │
-                    │  └─────┬─────┘  │
-                    └────────┼────────┘
-                             │
-              ┌──────────────┼──────────────┐
-              │              │              │
-        ┌─────▼─────┐ ┌─────▼─────┐ ┌─────▼─────┐
-        │  Worker 1  │ │  Worker 2  │ │  Worker N  │
-        │  (Rust)    │ │  (Rust)    │ │  (Rust)    │
-        │ native/    │ │ docker/    │ │ docker/    │
-        │ docker     │ │ native     │ │ wasm       │
-        └────────────┘ └────────────┘ └────────────┘
-```
-
-- Workers register with the control plane on startup
-- Periodic heartbeat (default 10s), offline detection (30s timeout)
-- Production scheduling uses NATS dispatch/result subjects with a dispatcher bridge
-- Dev mode can still execute directly against `AGENTOS_WORKER_ADDR`
-- Worker pool uses least-loaded selection plus lazy gRPC connection caching
-
-## Environment Variables
-
-| Variable | Description | Default |
-|----------|------------|---------|
-| `AGENTOS_MODE` | dev (memory + local scheduler) or prod (nats + postgres) | prod |
-| `AGENTOS_WORKER_ADDR` | Direct Rust worker gRPC address for dev/direct execution | localhost:50051 |
-| `AGENTOS_CONTROL_PLANE_ADDR` | Shared controller registry address for remote worker discovery | — |
-| `AGENTOS_SCHEDULER_MODE` | `local` or `nats` | prod: `nats`, dev: `local` |
-| `AGENTOS_NATS_URL` | NATS server URL for messaging/scheduler adapters | nats://localhost:4222 |
-| `AGENTOS_NATS_STREAM` | JetStream stream name | AGENTOS |
-| `AGENTOS_POSTGRES_DSN` | PostgreSQL DSN for persistence adapters | postgres://agentos:agentos@localhost:5432/agentos?sslmode=disable |
-| `AGENTOS_API_LISTEN_ADDR` | API server listen address | :8080 |
-| `AGENTOS_LLM_PROVIDER` | Planner provider name resolved from the LLM adapter registry | openai when API key is set in dev, otherwise stub |
-| `AGENTOS_LLM_API_KEY` | LLM API key (enables the configured LLM planner pipeline) | — |
-| `AGENTOS_LLM_BASE_URL` | LLM API base URL for OpenAI-compatible providers | https://api.openai.com |
-| `AGENTOS_LLM_MODEL` | LLM model name | gpt-4o |
-| `AGENTOS_RUNTIME` | Worker runtime: native or docker | native |
-| `AGENTOS_SECURITY_LEVEL` | supervised, semi, autonomous | supervised |
-| `AGENTOS_DOCKER_IMAGE` | Docker image for container sandbox | ubuntu:22.04 |
-| `AGENTOS_MAX_CONCURRENT_TASKS` | Worker concurrency limit | 4 |
-| `AGENTOS_AGENT_SECRETS` | Agent secret map (`agent=secret,agent2=secret2`) for opaque token injection | — |
-| `AGENTOS_AUTH_TOKENS` | Bearer auth map (`token=subject|tenant|role1;role2`) for `/v1/tasks*` and gateway routes | — |
-
-## Test Suite
-
-```bash
-# Go tests (13 test suites)
-go test ./...
-
-# Rust tests (5 test suites, 69+ tests)
-cd runtime && cargo test --workspace
-```
-
-## Roadmap
-
-| Stage | Focus | Status |
-|-------|-------|--------|
-| Stage 1: MVP | Core pipeline (submit -> plan -> execute -> result) | Done |
-| Stage 2: Agent System | LLM planner pipeline, Agent YAML DSL, Tools, Memory | Done |
-| Stage 3: Sandbox & Policy | Docker isolation, SecurityPolicy, PolicyEngine | Done |
-| Stage 4: Distributed | Worker registry, NATS scheduling, worker pool | Done |
-| Stage 5: Platform UX | Console, SDK, extension surfaces | Planned |
+- [Getting Started Guide](docs/guides/getting-started.md)
+- [Core Capabilities Reference](docs/reference/core-capabilities.md)
+- [Architecture Overview](docs/architecture/overview.md)
+- [Multiprocess Acceptance](docs/architecture/multiprocess-acceptance.md)
+- [Documentation Index](docs/README.md)
+- [Changelog](CHANGELOG.md)
 
 ## Open Core Boundary
 
-AgentOS publishes the repository core under **Apache-2.0** and keeps enterprise/cloud packaging outside the repository-core boundary.
+AgentOS publishes the platform core under `Apache-2.0` and keeps commercial packaging outside the repository boundary.
 
-- **Community**: open-source self-hosted control plane, runtime, scheduler, audit and telemetry APIs
-- **Enterprise**: org governance, SSO / SCIM / RBAC, audit center, longer retention, support
-- **Cloud**: managed control plane, hosted console, upgrades, billing, SLA
+- **Community** — self-hosted control plane, worker runtime, scheduling, audit APIs, replay, telemetry, and the agent-loop substrate
+- **Enterprise (future)** — org governance, SSO / SCIM / RBAC, long-retention audit center, and support workflows
+- **Cloud (future)** — hosted control plane, operator console, upgrades, billing, and SLA surfaces
 
-For the public repository, the focus is the **Community** core: the self-hosted execution substrate, orchestration contracts, scheduling, audit, and telemetry surfaces. Licensing details live in `docs/strategy/licensing-decision.md`.
-
-## Documentation
-
-- [Documentation Guide](docs/README.md)
-- [Changelog](CHANGELOG.md)
-- [Architecture Overview](docs/architecture/overview.md)
-- [Multiprocess Acceptance](docs/architecture/multiprocess-acceptance.md)
-- [Licensing Decision](docs/strategy/licensing-decision.md)
-- [Platform vs Capability Boundary](docs/architecture/platform-vs-capability-boundary.md)
+See [Licensing Decision](docs/strategy/licensing-decision.md) and [Platform vs Capability Boundary](docs/architecture/platform-vs-capability-boundary.md) for the current boundary.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and contribution guidelines, [SUPPORT.md](SUPPORT.md) for community support boundaries, [SECURITY.md](SECURITY.md) for vulnerability reporting, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and contribution guidelines. See [SUPPORT.md](SUPPORT.md), [SECURITY.md](SECURITY.md), and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community process and security reporting.
 
 ## License
 
-AgentOS core is licensed under [Apache-2.0](LICENSE). Enterprise add-ons and hosted cloud offerings may be distributed under separate commercial terms.
+The open-source core is licensed under [Apache-2.0](LICENSE). Enterprise extensions and hosted services can use separate commercial terms.

@@ -1,6 +1,6 @@
 # AgentOS Documentation Guide
 
-This page is the entry point for navigating the repository documentation.
+This page is the main entry point for navigating the repository documentation.
 
 ## Start Here
 
@@ -8,25 +8,40 @@ If you are new to the repository, read these first:
 
 - [Project README](../README.md)
 - [Chinese README](../README_CN.md)
+- [Getting Started Guide](guides/getting-started.md)
+- [Core Capabilities Reference](reference/core-capabilities.md)
 - [Changelog](../CHANGELOG.md)
 - [Contributing Guide](../CONTRIBUTING.md)
 - [Support Guide](../SUPPORT.md)
 - [Security Policy](../SECURITY.md)
 
-## Core Reading Path
+## Suggested Reading Path
 
 Use this order if you want to understand the project quickly:
 
-1. [Architecture Overview](architecture/overview.md)
-2. [AgentOS v1 Architecture](architecture/agentos-v1-architecture.md)
-3. [Monorepo Structure](architecture/monorepo-structure.md)
-4. [Platform vs Capability Boundary](architecture/platform-vs-capability-boundary.md)
-5. [Multiprocess Acceptance](architecture/multiprocess-acceptance.md)
+1. [Project README](../README.md)
+2. [Getting Started Guide](guides/getting-started.md)
+3. [Core Capabilities Reference](reference/core-capabilities.md)
+4. [Architecture Overview](architecture/overview.md)
+5. [AgentOS v1 Architecture](architecture/agentos-v1-architecture.md)
+6. [Multiprocess Acceptance](architecture/multiprocess-acceptance.md)
+
+## Guides
+
+- [Getting Started Guide](guides/getting-started.md)
+
+## Reference
+
+- [Core Capabilities Reference](reference/core-capabilities.md)
 
 ## Architecture Reference
 
 These documents explain specific subsystems in more detail:
 
+- [Architecture Overview](architecture/overview.md)
+- [AgentOS v1 Architecture](architecture/agentos-v1-architecture.md)
+- [Monorepo Structure](architecture/monorepo-structure.md)
+- [Platform vs Capability Boundary](architecture/platform-vs-capability-boundary.md)
 - [Pluggable Adapters](architecture/adapters.md)
 - [Skill System](architecture/skill-system.md)
 - [Policy Engine](architecture/policy-engine.md)
@@ -52,9 +67,9 @@ These folders are useful for contributors, but they are not the recommended firs
 ### For developers
 
 - [Project README](../README.md)
+- [Getting Started Guide](guides/getting-started.md)
+- [Core Capabilities Reference](reference/core-capabilities.md)
 - [Architecture Overview](architecture/overview.md)
-- [Monorepo Structure](architecture/monorepo-structure.md)
-- [Skill System](architecture/skill-system.md)
 
 ### For platform / infra teams
 
