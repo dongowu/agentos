@@ -10,6 +10,7 @@
 - [中文 README](../README_CN.md)
 - [快速上手](guides/getting-started-cn.md)
 - [核心能力参考](reference/core-capabilities-cn.md)
+- [架构概览](architecture/overview.md)
 - [变更记录](../CHANGELOG.md)
 - [贡献指南](../CONTRIBUTING.md)
 - [社区支持说明](../SUPPORT.md)
@@ -23,8 +24,8 @@
 2. [快速上手](guides/getting-started-cn.md)
 3. [核心能力参考](reference/core-capabilities-cn.md)
 4. [架构概览](architecture/overview.md)
-5. [AgentOS v1 架构](architecture/agentos-v1-architecture.md)
-6. [多进程验收说明](architecture/multiprocess-acceptance.md)
+5. [多进程验收说明](architecture/multiprocess-acceptance.md)
+6. [平台层与能力层边界](architecture/platform-vs-capability-boundary.md)
 
 ## 指南
 
@@ -34,19 +35,26 @@
 
 - [核心能力参考](reference/core-capabilities-cn.md)
 
-## 架构参考文档
+## 当前架构文档
 
-以下文档适合在理解整体之后按专题深入：
+以下文档更直接描述当前开源平台的能力面：
 
 - [架构概览](architecture/overview.md)
-- [AgentOS v1 架构](architecture/agentos-v1-architecture.md)
 - [Monorepo 结构](architecture/monorepo-structure.md)
 - [平台层与能力层边界](architecture/platform-vs-capability-boundary.md)
 - [可插拔适配器](architecture/adapters.md)
 - [技能系统](architecture/skill-system.md)
 - [策略引擎](architecture/policy-engine.md)
+- [多进程验收说明](architecture/multiprocess-acceptance.md)
 - [MVP 范围](architecture/mvp-scope.md)
-- [ClawOS v1 架构](architecture/clawos-v1-architecture.md)
+
+## 概念与历史设计
+
+以下文档适合作为背景材料阅读，但不建议作为新读者的第一站：
+
+- [概念文档索引](concepts/README_CN.md)
+- [AgentOS v1 架构](concepts/agentos-v1-architecture.md)
+- [ClawOS v1 架构](concepts/clawos-v1-architecture.md)
 
 ## 仓库边界
 
@@ -73,7 +81,7 @@
 
 ### 面向平台 / 基础设施团队
 
-- [AgentOS v1 架构](architecture/agentos-v1-architecture.md)
+- [架构概览](architecture/overview.md)
 - [多进程验收说明](architecture/multiprocess-acceptance.md)
 - [策略引擎](architecture/policy-engine.md)
 - [许可证决策](strategy/licensing-decision.md)

@@ -1,6 +1,6 @@
 # AgentOS v1 Architecture
 
-> **状态说明**：这是一份较长的 v1 设计参考文档，包含目标态设计与部分历史思路；当前公开仓库的实时实现口径，请优先阅读 [Architecture Overview](overview.md)、[Getting Started](../guides/getting-started.md) 与 [Core Capabilities Reference](../reference/core-capabilities.md)。
+> **状态说明**：这是一份较长的 v1 设计参考文档，包含目标态设计与部分历史思路；当前公开仓库的实时实现口径，请优先阅读 [Architecture Overview](../architecture/overview.md)、[Getting Started](../guides/getting-started.md) 与 [Core Capabilities Reference](../reference/core-capabilities.md)。
 >
 > **当前定位**：AgentOS 是一个采用 Go 控制面与 Rust 运行时平面的开源 Agent 执行平台，公开仓库聚焦 community core，而不是完整终端聊天产品或成熟企业控制台。
 
@@ -240,7 +240,7 @@ Action → Policy Check → allow / deny
 ### 实现规划
 
 - `internal/policy/` - Policy 引擎
-- 详见 [Policy Engine 设计](policy-engine.md)
+- 详见 [Policy Engine 设计](../architecture/policy-engine.md)
 
 ---
 
@@ -283,7 +283,7 @@ Action → Skill Resolver → Skill → ExecutionProfile
 ### 实现规划
 
 - `internal/skills/` - Skill Registry、Skill Resolver
-- 详见 [Skill System 设计](skill-system.md)
+- 详见 [Skill System 设计](../architecture/skill-system.md)
 
 ---
 
@@ -537,7 +537,7 @@ User → ManagerAgent → WorkerAgents
 
 ## 项目结构
 
-详见 [Monorepo 最终版结构](monorepo-structure.md)。
+详见 [Monorepo 最终版结构](../architecture/monorepo-structure.md)。
 
 ---
 
@@ -584,9 +584,9 @@ osctl submit "echo hello"
 
 ## 相关文档
 
-- [Monorepo 最终版结构](monorepo-structure.md)
-- [Architecture Overview](overview.md)
-- [Pluggable Adapters](adapters.md)
-- [Skill System 设计](skill-system.md)
-- [Policy Engine 设计](policy-engine.md)
-- [MVP Scope](mvp-scope.md)
+- [Monorepo 最终版结构](../architecture/monorepo-structure.md)
+- [Architecture Overview](../architecture/overview.md)
+- [Pluggable Adapters](../architecture/adapters.md)
+- [Skill System 设计](../architecture/skill-system.md)
+- [Policy Engine 设计](../architecture/policy-engine.md)
+- [MVP Scope](../architecture/mvp-scope.md)

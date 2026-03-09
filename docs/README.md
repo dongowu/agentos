@@ -10,6 +10,7 @@ If you are new to the repository, read these first:
 - [Chinese README](../README_CN.md)
 - [Getting Started Guide](guides/getting-started.md)
 - [Core Capabilities Reference](reference/core-capabilities.md)
+- [Architecture Overview](architecture/overview.md)
 - [Changelog](../CHANGELOG.md)
 - [Contributing Guide](../CONTRIBUTING.md)
 - [Support Guide](../SUPPORT.md)
@@ -23,8 +24,8 @@ Use this order if you want to understand the project quickly:
 2. [Getting Started Guide](guides/getting-started.md)
 3. [Core Capabilities Reference](reference/core-capabilities.md)
 4. [Architecture Overview](architecture/overview.md)
-5. [AgentOS v1 Architecture](architecture/agentos-v1-architecture.md)
-6. [Multiprocess Acceptance](architecture/multiprocess-acceptance.md)
+5. [Multiprocess Acceptance](architecture/multiprocess-acceptance.md)
+6. [Platform vs Capability Boundary](architecture/platform-vs-capability-boundary.md)
 
 ## Guides
 
@@ -34,19 +35,26 @@ Use this order if you want to understand the project quickly:
 
 - [Core Capabilities Reference](reference/core-capabilities.md)
 
-## Architecture Reference
+## Current Architecture
 
-These documents explain specific subsystems in more detail:
+These documents describe the current open-source platform shape more directly:
 
 - [Architecture Overview](architecture/overview.md)
-- [AgentOS v1 Architecture](architecture/agentos-v1-architecture.md)
 - [Monorepo Structure](architecture/monorepo-structure.md)
 - [Platform vs Capability Boundary](architecture/platform-vs-capability-boundary.md)
 - [Pluggable Adapters](architecture/adapters.md)
 - [Skill System](architecture/skill-system.md)
 - [Policy Engine](architecture/policy-engine.md)
+- [Multiprocess Acceptance](architecture/multiprocess-acceptance.md)
 - [MVP Scope](architecture/mvp-scope.md)
-- [ClawOS v1 Architecture](architecture/clawos-v1-architecture.md)
+
+## Concepts And Historical Design
+
+These documents are useful context, but they are not the recommended first stop for new readers:
+
+- [Concept Docs Index](concepts/README.md)
+- [AgentOS v1 Architecture](concepts/agentos-v1-architecture.md)
+- [ClawOS v1 Architecture](concepts/clawos-v1-architecture.md)
 
 ## Repository Boundary
 
@@ -73,7 +81,7 @@ These folders are useful for contributors, but they are not the recommended firs
 
 ### For platform / infra teams
 
-- [AgentOS v1 Architecture](architecture/agentos-v1-architecture.md)
+- [Architecture Overview](architecture/overview.md)
 - [Multiprocess Acceptance](architecture/multiprocess-acceptance.md)
 - [Policy Engine](architecture/policy-engine.md)
 - [Licensing Decision](strategy/licensing-decision.md)

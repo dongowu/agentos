@@ -2,7 +2,7 @@
 
 > **状态说明**：这是一份历史性的概念 / 对照文档，用来表达一个更偏产品化的目标态设想；它**不是**当前 AgentOS 开源仓库的正式 roadmap，也不是公开仓库已经实现的能力清单。
 >
-> **阅读建议**：如果你想了解当前仓库的真实能力，请优先阅读 [Architecture Overview](overview.md)、[Getting Started](../guides/getting-started.md) 与 [Core Capabilities Reference](../reference/core-capabilities.md)。
+> **阅读建议**：如果你想了解当前仓库的真实能力，请优先阅读 [Architecture Overview](../architecture/overview.md)、[Getting Started](../guides/getting-started.md) 与 [Core Capabilities Reference](../reference/core-capabilities.md)。
 >
 > **概念定位**：ClawOS = Agent Runtime + Tool Marketplace + Execution Sandbox 的产品化设想。
 
