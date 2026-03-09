@@ -30,6 +30,8 @@ type PolicyDecision struct {
 	Autonomy AutonomyLevel
 }
 
+const ReasonApprovalRequired = "approval required"
+
 // PolicyEngine evaluates whether an agent action is permitted.
 type PolicyEngine interface {
 	Evaluate(ctx context.Context, req PolicyRequest) (*PolicyDecision, error)

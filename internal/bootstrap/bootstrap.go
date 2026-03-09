@@ -182,7 +182,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 
 	var policyRules []policy.Rule
 	for _, r := range cfg.Policy.Rules {
-		policyRules = append(policyRules, policy.Rule{Agent: r.Agent, Actions: policy.Actions{Allow: r.Allow, Deny: r.Deny}})
+		policyRules = append(policyRules, policy.Rule{Agent: r.Agent, Actions: policy.Actions{Allow: r.Allow, Deny: r.Deny, ApprovalRequired: r.ApprovalRequired}})
 	}
 	policyEngine := policy.NewDefaultEngine(policy.Config{
 		Rules:           policyRules,

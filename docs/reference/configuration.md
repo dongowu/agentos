@@ -93,6 +93,7 @@ These variables are read by `pkg/config` and `internal/bootstrap`.
 | `AGENTOS_LLM_MODEL` | LLM model name | `gpt-4o` |
 | `AGENTOS_AGENT_SECRETS` | agent secret mapping | parsed as `agent=secret,agent2=secret2` |
 | `AGENTOS_AUTH_TOKENS` | bearer token mapping | parsed as `token=subject\|tenant\|role1;role2,...` |
+| `AGENTOS_POLICY_APPROVAL_REQUIRED` | global approval-gate tool patterns | parsed as `tool,tool2,*pattern*`; adds a wildcard policy rule that blocks matched tools with reason `approval required` |
 
 ### HTTP API Server
 
@@ -175,6 +176,30 @@ Meaning:
 - `subject` is required
 - `tenant` and `roles` are optional
 - roles are separated with `;`
+
+### `AGENTOS_POLICY_APPROVAL_REQUIRED`
+
+Format:
+
+```text
+shell,git.clone,http.post
+```
+
+Meaning:
+
+- each entry is a tool glob pattern
+- empty entries are ignored
+- bootstrap appends a wildcard policy rule with `approval_required` patterns
+- matching actions are blocked by policy with reason `approval required`
+
+## Policy Rule Fields
+
+When constructing `config.Config` directly in code, each `policy.rules` entry supports:
+
+- `agent`: agent glob to match
+- `allow`: allowed tool patterns
+- `deny`: denied tool patterns
+- `approval_required`: tool patterns that must stop at a governance gate instead of executing immediately
 
 ## Practical Profiles
 
