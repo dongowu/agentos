@@ -166,3 +166,57 @@ func TestRecallContext_ProviderError(t *testing.T) {
 		t.Errorf("expected wrapped provider error, got: %v", err)
 	}
 }
+
+func TestStoreScopedResult_EmbedsScopeMetadata(t *testing.T) {
+	mock := &mockMemoryProvider{}
+	h := NewMemoryHook(mock)
+
+	err := h.StoreScopedResult(context.Background(), "tenant-a", "agent-1", "deploy project", "task-1", map[string]any{"exit_code": 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.putCalls) != 1 {
+		t.Fatalf("expected 1 Put call, got %d", len(mock.putCalls))
+	}
+	call := mock.putCalls[0]
+	if call.key != "scope:tenant=tenant-a;agent=agent-1/task:task-1" {
+		t.Fatalf("unexpected scoped key %q", call.key)
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(call.value, &stored); err != nil {
+		t.Fatalf("stored value is not valid JSON: %v", err)
+	}
+	if stored["tenant_id"] != "tenant-a" {
+		t.Fatalf("expected tenant-a, got %v", stored["tenant_id"])
+	}
+	if stored["agent_name"] != "agent-1" {
+		t.Fatalf("expected agent-1, got %v", stored["agent_name"])
+	}
+	if stored["prompt"] != "deploy project" {
+		t.Fatalf("expected prompt stored, got %v", stored["prompt"])
+	}
+}
+
+func TestRecallScopedContext_FiltersByScope(t *testing.T) {
+	sameScope := []byte(`{"scope":"scope:tenant=tenant-a;agent=agent-1","prompt":"deploy project","stdout":"ok"}`)
+	otherScope := []byte(`{"scope":"scope:tenant=tenant-b;agent=agent-9","prompt":"deploy project","stdout":"nope"}`)
+	mock := &mockMemoryProvider{searchRes: []memory.SearchResult{{Key: "a", Content: sameScope, Score: 0.9}, {Key: "b", Content: otherScope, Score: 0.95}}}
+	h := NewMemoryHook(mock)
+
+	results, err := h.RecallScopedContext(context.Background(), "tenant-a", "agent-1", "deploy project", 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.searchCalls) != 1 {
+		t.Fatalf("expected 1 Search call, got %d", len(mock.searchCalls))
+	}
+	if mock.searchCalls[0].query != "scope:tenant=tenant-a;agent=agent-1" {
+		t.Fatalf("unexpected scope query %q", mock.searchCalls[0].query)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 scoped result, got %d", len(results))
+	}
+	if results[0].Key != "a" {
+		t.Fatalf("expected scoped result key a, got %q", results[0].Key)
+	}
+}

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/dongowu/agentos/internal/adapter"
 	"github.com/dongowu/agentos/internal/adapters/llm"
+	"github.com/dongowu/agentos/pkg/config"
 )
 
 // Client is an OpenAI-compatible chat completion client using net/http.
@@ -15,6 +17,23 @@ type Client struct {
 	baseURL    string
 	apiKey     string
 	httpClient *http.Client
+}
+
+func init() {
+	adapter.RegisterLLMProvider("openai", func(cfg config.LLMConfig) (llm.Provider, string, error) {
+		if cfg.APIKey == "" {
+			return nil, "", fmt.Errorf("openai: api key required")
+		}
+		baseURL := cfg.BaseURL
+		if baseURL == "" {
+			baseURL = "https://api.openai.com"
+		}
+		model := cfg.Model
+		if model == "" {
+			model = "gpt-4o"
+		}
+		return NewClient(baseURL, cfg.APIKey), model, nil
+	})
 }
 
 // NewClient creates a Client for the given base URL and API key.

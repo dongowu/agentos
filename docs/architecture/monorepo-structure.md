@@ -41,25 +41,24 @@ agentos/
 │   │   ├── contracts.go           # Planner, TaskEngine, SkillResolver 接口
 │   │   ├── engine_impl.go         # TaskEngine 实现
 │   │   ├── engine_impl_test.go
-│   │   ├── stub_planner.go        # MVP 占位 Planner
-│   │   ├── stub_skill_resolver.go  # MVP 占位 SkillResolver
-│   │   └── planner/               # 未来：多模型 Planner 适配器
+│   │   ├── stub_planner.go        # 测试/MVP 回退 Planner
+│   │   ├── stub_skill_resolver.go  # 测试用简单 Resolver
+│   │   └── planner/               # 未来：更多 Planner 适配器
 │   │       ├── openai/
 │   │       ├── claude/
 │   │       └── local/
 │   │
-│   ├── policy/                    # Policy Engine（未来）
+│   ├── policy/                    # Policy Engine（已实现）
 │   │   ├── engine.go
 │   │   ├── checker.go
 │   │   └── loader.go
 │   │
-│   ├── skills/                   # Skill System（未来）
+│   ├── skills/                   # Skill System（已实现基础注册表与 resolver）
 │   │   ├── registry.go
 │   │   ├── resolver.go
-│   │   └── builtin/
-│   │       └── shell.go
+│   │   └── builtin.go
 │   │
-│   ├── broker/                   # Runtime Broker（未来）
+│   ├── broker/                   # Runtime Broker（设计稿，现由 scheduler/worker 承担主链路）
 │   │   ├── scheduler.go
 │   │   └── worker_pool.go
 │   │

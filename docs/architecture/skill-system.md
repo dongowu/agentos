@@ -136,18 +136,19 @@ ExecutorClient.ExecuteAction(..., profile, payload)
 
 ## 实现规划
 
-### Phase 1（MVP）
+### 当前状态（2026-03-08）
 
-- `internal/orchestration/stub_skill_resolver.go` 已有，只支持 `shell.exec`
-- 硬编码 mapping: `shell.exec` → `sandbox`
-- 无 Skill 表，无动态注册
+- `internal/skills/` 已落地，提供内存注册表与 `Resolver`
+- 内置 action kinds：`command.exec`、`file.read`、`file.write`、`http.request`、`browser.step`
+- `SkillResolver` 现在会做 action kind 查找、基础 payload 校验，并解析 runtime profile
+- `EngineImpl` 不再静默吞掉 resolver 错误，解析失败会直接让任务进入 `failed`
+- `file.read`、`file.write`、直接 tool kind 与 `http.request` 已可通过 control-plane tool bridge 执行
+- 当前执行面仍然是“bridge + command runtime”混合模式；浏览器类 action 与更专用的独立执行器仍未完整落地
 
-### Phase 2
+### 下一阶段
 
-- `internal/skills/` 包
-- `SkillRegistry` 接口 + 内存实现
 - 支持从 YAML 加载 Skill 定义
-- `SkillResolver` 改为调用 `SkillRegistry`
+- 扩展更细的参数 schema 与 tenant 级 skill catalog
 
 ### Phase 3
 
@@ -157,16 +158,14 @@ ExecutorClient.ExecuteAction(..., profile, payload)
 
 ---
 
-## 文件结构（Phase 2）
+## 当前文件结构
 
 ```
 internal/
   skills/
-    registry.go      # SkillRegistry 接口与实现
-    resolver.go      # SkillResolver 实现，依赖 Registry
-    schema.go        # ParameterSchema 等
-    builtin/
-      shell.go       # shell.exec 定义
+    registry.go      # Skill 注册表与定义
+    resolver.go      # SkillResolver 实现，负责校验与 profile 解析
+    builtin.go       # 当前内置 action kind 定义
 ```
 
 ---

@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dongowu/agentos/internal/access"
 	"github.com/dongowu/agentos/internal/messaging"
+	"github.com/dongowu/agentos/internal/persistence"
 	"github.com/dongowu/agentos/pkg/events"
 )
 
@@ -161,5 +163,60 @@ func TestServer_ActionStream_EmitsRuntimeOutputAndCompletion(t *testing.T) {
 	}
 	if !strings.Contains(body, "\"text\":\"hello\"") {
 		t.Fatalf("expected output chunk text in action stream body, got %q", body)
+	}
+}
+
+type completedTaskAPI struct{ stubTaskAPI }
+
+func (completedTaskAPI) GetTask(_ context.Context, taskID string) (*access.CreateTaskResponse, error) {
+	return &access.CreateTaskResponse{TaskID: taskID, State: "succeeded"}, nil
+}
+
+func TestServer_TaskStream_ReplaysPersistedAuditForCompletedTask(t *testing.T) {
+	occurred := time.Unix(1_700_000_000, 0).UTC()
+	bus := newStreamBus()
+	audit := &stubAuditStore{byTask: map[string][]persistence.AuditRecord{
+		"task-123": {
+			{TaskID: "task-123", ActionID: "act-1", ExitCode: 0, WorkerID: "worker-1", Stdout: "hello", Stderr: "warn", OccurredAt: occurred},
+		},
+	}}
+	srv := &Server{API: completedTaskAPI{}, Audit: audit, Bus: bus}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/task-123/stream", nil).WithContext(ctx)
+	rec := newFlushBuffer()
+	done := make(chan struct{})
+	go func() {
+		srv.handler().ServeHTTP(rec, req)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		cancel()
+		<-done
+		t.Fatal("timed out waiting for replay stream to finish")
+	}
+
+	if rec.code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.code)
+	}
+	body := rec.String()
+	if !strings.Contains(body, "event: task.snapshot") {
+		t.Fatalf("expected task snapshot event, got %q", body)
+	}
+	if !strings.Contains(body, "event: task.action.output") {
+		t.Fatalf("expected replayed task.action.output event, got %q", body)
+	}
+	if !strings.Contains(body, "event: task.action.completed") {
+		t.Fatalf("expected replayed task.action.completed event, got %q", body)
+	}
+	if !strings.Contains(body, "\"text\":\"hello\"") {
+		t.Fatalf("expected replay stdout payload, got %q", body)
+	}
+	if !strings.Contains(body, "\"stderr\":\"warn\"") {
+		t.Fatalf("expected replay stderr payload, got %q", body)
 	}
 }

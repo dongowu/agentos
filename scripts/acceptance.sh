@@ -10,7 +10,13 @@ mkdir -p "$BIN_DIR" "$LOG_DIR"
 API_ADDR=${AGENTOS_API_LISTEN_ADDR:-127.0.0.1:18080}
 CTRL_ADDR=${AGENTOS_ACCEPTANCE_CONTROL_ADDR:-127.0.0.1:15052}
 WORKER_ADDR=${AGENTOS_ACCEPTANCE_WORKER_ADDR:-127.0.0.1:15051}
-TASK_PROMPT=${AGENTOS_ACCEPTANCE_PROMPT:-echo acceptance-ok}
+TASK_PROMPT=${AGENTOS_ACCEPTANCE_PROMPT:-echo acceptance-one then echo acceptance-two}
+EXPECTED_ACTIONS=${AGENTOS_ACCEPTANCE_EXPECTED_ACTIONS:-2}
+BRIDGE_CONTENT=${AGENTOS_ACCEPTANCE_BRIDGE_CONTENT:-bridge-acceptance}
+BRIDGE_FILE=${AGENTOS_ACCEPTANCE_BRIDGE_FILE:-$TMP_DIR/bridge-acceptance.txt}
+BRIDGE_PROMPT=${AGENTOS_ACCEPTANCE_BRIDGE_PROMPT:-write $BRIDGE_CONTENT to $BRIDGE_FILE then read $BRIDGE_FILE}
+AUTH_TOKEN=${AGENTOS_ACCEPTANCE_AUTH_TOKEN:-acceptance-token}
+AUTH_PRINCIPAL=${AGENTOS_ACCEPTANCE_AUTH_PRINCIPAL:-acceptance-user|tenant-acceptance}
 GO_CACHE_DIR=${GOCACHE:-$TMP_DIR/go-build}
 
 CONTROLLER_PID=""
@@ -109,6 +115,7 @@ echo "[acceptance] starting apiserver on $API_ADDR"
 AGENTOS_MODE=dev \
 AGENTOS_CONTROL_PLANE_ADDR="$CTRL_ADDR" \
 AGENTOS_API_LISTEN_ADDR="$API_ADDR" \
+AGENTOS_AUTH_TOKENS="$AUTH_TOKEN=$AUTH_PRINCIPAL" \
 "$BIN_DIR/apiserver" >"$LOG_DIR/apiserver.log" 2>&1 &
 APISERVER_PID=$!
 
@@ -132,6 +139,7 @@ fi
 
 echo "[acceptance] submitting task through apiserver"
 SUBMIT_RESPONSE=$(curl -fsS -X POST "http://$API_ADDR/v1/tasks" \
+  -H "Authorization: Bearer $AUTH_TOKEN" \
   -H 'Content-Type: application/json' \
   -d "{\"prompt\":\"$TASK_PROMPT\"}")
 TASK_ID=$(printf '%s' "$SUBMIT_RESPONSE" | json_field task_id)
@@ -145,7 +153,7 @@ echo "[acceptance] task_id=$TASK_ID initial_state=$INITIAL_STATE"
 
 FINAL_STATE=""
 for _ in $(seq 1 120); do
-  TASK_RESPONSE=$(curl -fsS "http://$API_ADDR/v1/tasks/$TASK_ID")
+  TASK_RESPONSE=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$TASK_ID")
   FINAL_STATE=$(printf '%s' "$TASK_RESPONSE" | json_field state)
   if [[ "$FINAL_STATE" == "succeeded" ]]; then
     break
@@ -163,26 +171,97 @@ if [[ "$FINAL_STATE" != "succeeded" ]]; then
 fi
 
 echo "[acceptance] verifying task audit API"
-TASK_AUDIT=$(curl -fsS "http://$API_ADDR/v1/tasks/$TASK_ID/audit")
-ACTION_ID=$(printf '%s' "$TASK_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; assert records, "no audit records returned"; print(records[0]["action_id"])')
+TASK_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$TASK_ID/audit")
+ACTION_COUNT=$(printf '%s' "$TASK_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; print(len(records))')
+if [[ "$ACTION_COUNT" -lt "$EXPECTED_ACTIONS" ]]; then
+  echo "expected at least $EXPECTED_ACTIONS audit records, got $ACTION_COUNT: $TASK_AUDIT"
+  exit 1
+fi
+ACTION_ID=$(printf '%s' "$TASK_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; assert records, "no audit records returned"; print(records[-1]["action_id"])')
 if [[ -z "$ACTION_ID" ]]; then
   echo "failed to parse action_id from task audit response: $TASK_AUDIT"
   exit 1
 fi
 
 echo "[acceptance] verifying action audit API for action_id=$ACTION_ID"
-ACTION_AUDIT=$(curl -fsS "http://$API_ADDR/v1/tasks/$TASK_ID/actions/$ACTION_ID/audit")
+ACTION_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$TASK_ID/actions/$ACTION_ID/audit")
 ACTION_EXIT=$(printf '%s' "$ACTION_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get("exit_code", ""))')
 if [[ "$ACTION_EXIT" != "0" ]]; then
   echo "unexpected action audit exit code: $ACTION_AUDIT"
   exit 1
 fi
 
+echo "[acceptance] verifying global audit API"
+GLOBAL_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/audit?failed=false&limit=20")
+GLOBAL_MATCHES=$(printf '%s' "$GLOBAL_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; task_id=sys.argv[1]; print(sum(1 for r in records if r.get("task_id") == task_id and r.get("tenant_id") == "tenant-acceptance"))' "$TASK_ID")
+if [[ "$GLOBAL_MATCHES" -lt 1 ]]; then
+  echo "expected global audit feed to include accepted tenant record for task $TASK_ID: $GLOBAL_AUDIT"
+  exit 1
+fi
+
+echo "[acceptance] stopping worker to verify tool bridge without Rust runtime"
+if [[ -n "$WORKER_PID" ]] && kill -0 "$WORKER_PID" 2>/dev/null; then
+  kill "$WORKER_PID" 2>/dev/null || true
+  wait "$WORKER_PID" 2>/dev/null || true
+fi
+WORKER_PID=""
+
+echo "[acceptance] submitting bridge task through apiserver"
+BRIDGE_RESPONSE=$(curl -fsS -X POST "http://$API_ADDR/v1/tasks" \
+  -H "Authorization: Bearer $AUTH_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"prompt\":\"$BRIDGE_PROMPT\"}")
+BRIDGE_TASK_ID=$(printf '%s' "$BRIDGE_RESPONSE" | json_field task_id)
+BRIDGE_INITIAL_STATE=$(printf '%s' "$BRIDGE_RESPONSE" | json_field state)
+if [[ -z "$BRIDGE_TASK_ID" ]]; then
+  echo "failed to parse bridge task_id from response: $BRIDGE_RESPONSE"
+  exit 1
+fi
+
+echo "[acceptance] bridge_task_id=$BRIDGE_TASK_ID initial_state=$BRIDGE_INITIAL_STATE"
+BRIDGE_FINAL_STATE=""
+for _ in $(seq 1 120); do
+  BRIDGE_TASK_RESPONSE=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$BRIDGE_TASK_ID")
+  BRIDGE_FINAL_STATE=$(printf '%s' "$BRIDGE_TASK_RESPONSE" | json_field state)
+  if [[ "$BRIDGE_FINAL_STATE" == "succeeded" ]]; then
+    break
+  fi
+  if [[ "$BRIDGE_FINAL_STATE" == "failed" ]]; then
+    echo "bridge task entered failed state: $BRIDGE_TASK_RESPONSE"
+    exit 1
+  fi
+  sleep 0.5
+ done
+
+if [[ "$BRIDGE_FINAL_STATE" != "succeeded" ]]; then
+  echo "bridge task did not reach succeeded state; last_state=$BRIDGE_FINAL_STATE"
+  exit 1
+fi
+
+if [[ ! -f "$BRIDGE_FILE" ]]; then
+  echo "bridge file was not created: $BRIDGE_FILE"
+  exit 1
+fi
+BRIDGE_FILE_CONTENT=$(cat "$BRIDGE_FILE")
+if [[ "$BRIDGE_FILE_CONTENT" != "$BRIDGE_CONTENT" ]]; then
+  echo "unexpected bridge file content: $BRIDGE_FILE_CONTENT"
+  exit 1
+fi
+
+BRIDGE_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$BRIDGE_TASK_ID/audit")
+BRIDGE_LAST_WORKER=$(printf '%s' "$BRIDGE_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; assert records, "no bridge audit records returned"; print(records[-1].get("worker_id", ""))')
+if [[ "$BRIDGE_LAST_WORKER" != "control-plane" ]]; then
+  echo "expected bridge audit worker_id control-plane, got $BRIDGE_LAST_WORKER: $BRIDGE_AUDIT"
+  exit 1
+fi
+
 echo "[acceptance] success"
 echo "- controller: $CTRL_ADDR"
 echo "- apiserver:  $API_ADDR"
-echo "- worker:     $WORKER_ADDR"
+echo "- worker:     stopped before bridge verification"
 echo "- task_id:    $TASK_ID"
 echo "- action_id:  $ACTION_ID"
 echo "- final:      $FINAL_STATE"
-echo "- evidence:   worker registered, task succeeded, and audit endpoints returned persisted records"
+echo "- action_cnt: $ACTION_COUNT"
+echo "- bridge:     $BRIDGE_TASK_ID ($BRIDGE_FINAL_STATE via control-plane)"
+echo "- evidence:   worker registered, authenticated task submission succeeded, multi-step plan completed, audit endpoints returned persisted records, and file/http-style actions still executed after the Rust worker was stopped"

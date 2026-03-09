@@ -94,3 +94,22 @@ func TestPromptPlanner_SplitsThenIntoMultipleActions(t *testing.T) {
 		t.Fatalf("expected second action file.write, got %q", plan.Actions[1].Kind)
 	}
 }
+
+func TestPromptPlanner_IgnoresAppendedRelevantPastContextBlock(t *testing.T) {
+	planner := &PromptPlanner{}
+	prompt := `write bridge-acceptance to /tmp/bridge.txt then read /tmp/bridge.txt
+
+Relevant past context:
+- {"prompt":"echo acceptance-one then echo acceptance-two"}
+`
+	plan, err := planner.Plan(context.Background(), PlanInput{TaskID: "task-6", Prompt: prompt})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if len(plan.Actions) != 2 {
+		t.Fatalf("expected 2 actions, got %d", len(plan.Actions))
+	}
+	if plan.Actions[0].Kind != "file.write" || plan.Actions[1].Kind != "file.read" {
+		t.Fatalf("unexpected actions: %#v", plan.Actions)
+	}
+}

@@ -2,10 +2,12 @@ package scheduler
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/dongowu/agentos/internal/actionbridge"
 	"github.com/dongowu/agentos/internal/runtimeclient"
 	"github.com/dongowu/agentos/pkg/taskdsl"
 	"github.com/nats-io/nats.go"
@@ -163,5 +165,41 @@ func TestNATSScheduler_UsesConfiguredSubjectPrefix(t *testing.T) {
 	}
 	if len(js.history) == 0 || js.history[0] != "CUSTOM.actions.dispatch" {
 		t.Fatalf("expected first published subject CUSTOM.actions.dispatch, got %v", js.history)
+	}
+}
+
+func TestNATSDispatcher_BridgeExecutesWithoutWorker(t *testing.T) {
+	js := newFakeJetStream()
+	pool := &fakePool{selErr: context.DeadlineExceeded}
+	dispatcher := NewNATSDispatcher(js, "TEST", pool).WithActionBridge(actionbridge.New())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := dispatcher.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer dispatcher.Close()
+
+	sched := NewNATSScheduler(js, "TEST")
+	defer sched.Close()
+	path := filepath.Join(t.TempDir(), "nats-bridge.txt")
+
+	if err := sched.Submit(ctx, "task-bridge", &taskdsl.Action{ID: "act-bridge", Kind: "file.write", Payload: map[string]any{"path": path, "content": "nats bridge"}}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	select {
+	case result := <-sched.Results():
+		if result.WorkerID != "control-plane" {
+			t.Fatalf("expected control-plane worker id, got %q", result.WorkerID)
+		}
+		if result.ExitCode != 0 {
+			t.Fatalf("expected exit code 0, got %d", result.ExitCode)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for NATS result")
+	}
+
+	if len(pool.getExecLog()) != 0 {
+		t.Fatalf("expected no worker execution, got %d", len(pool.getExecLog()))
 	}
 }

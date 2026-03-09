@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/dongowu/agentos/internal/adapters/llm"
 	"github.com/dongowu/agentos/pkg/taskdsl"
 )
 
@@ -51,6 +52,22 @@ func TestRetryPlanner_RetriesThenSucceeds(t *testing.T) {
 	}
 }
 
+func TestRetryPlanner_DoesNotRetryMalformedPlan(t *testing.T) {
+	inner := &stubPlanner{err: ErrMalformedPlan}
+	planner := NewRetryPlanner(inner, 3)
+
+	_, err := planner.Plan(context.Background(), PlanInput{Prompt: "echo hi"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrMalformedPlan) {
+		t.Fatalf("expected ErrMalformedPlan, got %v", err)
+	}
+	if inner.calls != 1 {
+		t.Fatalf("expected malformed plan to stop retries, got %d calls", inner.calls)
+	}
+}
+
 func TestFallbackPlanner_UsesSecondaryOnPrimaryError(t *testing.T) {
 	primary := &stubPlanner{err: errors.New("provider down")}
 	secondary := &stubPlanner{plan: &taskdsl.Plan{Actions: []taskdsl.Action{{ID: "b1", Kind: "file.read", RuntimeEnv: "default", Payload: map[string]any{"path": "/tmp/a"}}}}}
@@ -83,5 +100,41 @@ func TestPromptPlanner_SplitsSemicolonsAndNewlines(t *testing.T) {
 	}
 	if plan.Actions[1].Kind != "file.write" {
 		t.Fatalf("expected second action file.write, got %q", plan.Actions[1].Kind)
+	}
+}
+
+func TestFallbackPlanner_UsesPromptPlannerWhenPrimaryReturnsMalformedPlanError(t *testing.T) {
+	provider := &mockProvider{response: &llm.Response{Content: "not valid plan text"}}
+	primary := NewLLMPlanner(provider, "gpt-4")
+	secondary := &PromptPlanner{}
+	planner := NewFallbackPlanner(primary, secondary)
+
+	plan, err := planner.Plan(context.Background(), PlanInput{Prompt: "read /tmp/a then write done to /tmp/b"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(plan.Actions) != 2 {
+		t.Fatalf("expected prompt planner fallback with 2 actions, got %#v", plan)
+	}
+	if plan.Actions[0].Kind != "file.read" || plan.Actions[1].Kind != "file.write" {
+		t.Fatalf("unexpected fallback plan: %#v", plan)
+	}
+}
+
+func TestFallbackPlanner_UsesPromptPlannerWhenRepairFails(t *testing.T) {
+	provider := &mockProvider{responses: []*llm.Response{{Content: "not json"}, {Content: "still bad"}}}
+	primary := NewLLMPlanner(provider, "gpt-4")
+	secondary := &PromptPlanner{}
+	planner := NewFallbackPlanner(primary, secondary)
+
+	plan, err := planner.Plan(context.Background(), PlanInput{Prompt: "read /tmp/a then write done to /tmp/b"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(plan.Actions) != 2 {
+		t.Fatalf("expected prompt planner fallback with 2 actions, got %#v", plan)
+	}
+	if len(provider.requests) != 2 {
+		t.Fatalf("expected primary planner to attempt repair, got %d provider calls", len(provider.requests))
 	}
 }

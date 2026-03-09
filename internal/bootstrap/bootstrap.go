@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/dongowu/agentos/internal/access"
+	"github.com/dongowu/agentos/internal/actionbridge"
 	"github.com/dongowu/agentos/internal/adapter"
 	"github.com/dongowu/agentos/internal/adapters/llm"
-	"github.com/dongowu/agentos/internal/adapters/llm/openai"
 	adapternats "github.com/dongowu/agentos/internal/adapters/messaging/nats"
 	adapterruntime "github.com/dongowu/agentos/internal/adapters/runtimeclient"
 	"github.com/dongowu/agentos/internal/agent"
@@ -22,12 +22,14 @@ import (
 	"github.com/dongowu/agentos/internal/policy"
 	"github.com/dongowu/agentos/internal/runtimeclient"
 	"github.com/dongowu/agentos/internal/scheduler"
+	"github.com/dongowu/agentos/internal/skills"
 	"github.com/dongowu/agentos/internal/tool"
 	"github.com/dongowu/agentos/internal/worker"
 	"github.com/dongowu/agentos/pkg/config"
 	"github.com/dongowu/agentos/pkg/events"
 
 	_ "github.com/dongowu/agentos/internal/adapters/defaults"
+	_ "github.com/dongowu/agentos/internal/adapters/llm/openai"
 	_ "github.com/dongowu/agentos/internal/tool/builtin"
 )
 
@@ -55,18 +57,19 @@ type closeFunc func() error
 func (f closeFunc) Close() error { return f() }
 
 func llmProviderFromConfig(cfg config.Config) (llm.Provider, string) {
-	if cfg.LLM.Provider != "openai" || cfg.LLM.APIKey == "" {
+	providerName := cfg.LLM.Provider
+	if providerName == "" || providerName == "stub" || providerName == "auto" {
 		return nil, ""
 	}
-	baseURL := cfg.LLM.BaseURL
-	if baseURL == "" {
-		baseURL = "https://api.openai.com"
+	provider, defaultModel, err := adapter.NewLLMProvider(cfg.LLM)
+	if err != nil || provider == nil {
+		return nil, ""
 	}
 	model := cfg.LLM.Model
 	if model == "" {
-		model = "gpt-4o"
+		model = defaultModel
 	}
-	return openai.NewClient(baseURL, cfg.LLM.APIKey), model
+	return provider, model
 }
 
 func authProviderFromConfig(cfg config.Config) access.AuthProvider {
@@ -94,10 +97,10 @@ func plannerFromConfig(cfg config.Config) orchestration.Planner {
 	return orchestration.NewFallbackPlanner(llmPlanner, promptPlanner)
 }
 
-func schedulerFromConfig(ctx context.Context, cfg config.Config, pool scheduler.WorkerPool, startDispatcher bool, outputHook func(runtimeclient.StreamChunk)) (scheduler.Scheduler, []io.Closer, error) {
+func schedulerFromConfig(ctx context.Context, cfg config.Config, pool scheduler.WorkerPool, startDispatcher bool, outputHook func(runtimeclient.StreamChunk), bridge *actionbridge.Bridge) (scheduler.Scheduler, []io.Closer, error) {
 	switch cfg.Scheduler.Mode {
 	case "", "local":
-		sched := scheduler.NewLocalScheduler(pool).WithOutputHook(outputHook)
+		sched := scheduler.NewLocalScheduler(pool).WithOutputHook(outputHook).WithActionBridge(bridge)
 		return sched, []io.Closer{sched}, nil
 	case "nats":
 		nc, js, stream, err := adapternats.OpenJetStream(cfg.Messaging.NATS.URL, cfg.Messaging.NATS.Stream)
@@ -110,7 +113,7 @@ func schedulerFromConfig(ctx context.Context, cfg config.Config, pool scheduler.
 			return nil
 		}), sched}
 		if startDispatcher {
-			dispatcher := scheduler.NewNATSDispatcherFromJetStream(js, stream, pool).WithOutputHook(outputHook)
+			dispatcher := scheduler.NewNATSDispatcherFromJetStream(js, stream, pool).WithOutputHook(outputHook).WithActionBridge(bridge)
 			if err := dispatcher.Start(ctx); err != nil {
 				nc.Close()
 				return nil, nil, fmt.Errorf("start dispatcher: %w", err)
@@ -154,7 +157,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	}
 
 	planner := plannerFromConfig(cfg)
-	resolver := &orchestration.StubSkillResolver{}
+	resolver := skills.NewResolver(skills.DefaultRegistry())
 
 	memOpts := map[string]any{}
 	if cfg.Memory.TTL != "" {
@@ -209,8 +212,9 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	outputHook := func(chunk runtimeclient.StreamChunk) {
 		emitActionOutput(bus, chunk)
 	}
+	actionBridge := actionbridge.New()
 	startDispatcher := cfg.Scheduler.Mode == "nats" && cfg.Scheduler.ControlPlaneAddr == ""
-	sched, schedClosers, err := schedulerFromConfig(ctx, cfg, workerPool, startDispatcher, outputHook)
+	sched, schedClosers, err := schedulerFromConfig(ctx, cfg, workerPool, startDispatcher, outputHook, actionBridge)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: %w", err)
 	}
@@ -228,7 +232,8 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	engine := orchestration.NewEngineImpl(repo, bus, planner, resolver, executor, policyEngine, sched).
 		WithMemoryHook(memoryHook).
 		WithVault(vault).
-		WithAuditStore(audit)
+		WithAuditStore(audit).
+		WithActionBridge(actionBridge)
 
 	// Wire agent loop when LLM is configured.
 	llmProv, llmModel := llmProviderFromConfig(cfg)

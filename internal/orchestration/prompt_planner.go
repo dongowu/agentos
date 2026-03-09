@@ -12,6 +12,8 @@ import (
 
 var writePromptPattern = regexp.MustCompile(`(?i)^write\s+(.+?)\s+(?:to|into)\s+(.+)$`)
 
+const relevantPastContextMarker = "\n\nRelevant past context:\n"
+
 // PromptPlanner is the non-LLM fallback planner.
 // It tries a small set of explicit heuristics first, then falls back to
 // wrapping the original prompt as a command action.
@@ -33,6 +35,9 @@ func (p *PromptPlanner) Plan(_ context.Context, input PlanInput) (*taskdsl.Plan,
 
 func splitPromptSegments(prompt string) []string {
 	normalized := strings.TrimSpace(prompt)
+	if idx := strings.Index(normalized, strings.TrimSpace(relevantPastContextMarker)); idx >= 0 {
+		normalized = strings.TrimSpace(normalized[:idx])
+	}
 	if normalized == "" {
 		return nil
 	}

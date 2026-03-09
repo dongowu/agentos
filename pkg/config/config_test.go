@@ -62,3 +62,20 @@ func TestApplyEnvOverrides_AuthTokens(t *testing.T) {
 		t.Fatalf("expected tenant tenant-b, got %q", cfg.Auth.Tokens["token-b"].TenantID)
 	}
 }
+
+func TestApplyEnvOverrides_MessagingAndPersistence(t *testing.T) {
+	t.Setenv("AGENTOS_NATS_URL", "nats://nats.example.com:4222")
+	t.Setenv("AGENTOS_NATS_STREAM", "AGENTOS_TEST")
+	t.Setenv("AGENTOS_POSTGRES_DSN", "postgres://user:pass@db.example.com:5432/agentos?sslmode=disable")
+
+	cfg := ApplyEnvOverrides(Config{})
+	if cfg.Messaging.NATS.URL != "nats://nats.example.com:4222" {
+		t.Fatalf("expected nats url override, got %q", cfg.Messaging.NATS.URL)
+	}
+	if cfg.Messaging.NATS.Stream != "AGENTOS_TEST" {
+		t.Fatalf("expected nats stream override, got %q", cfg.Messaging.NATS.Stream)
+	}
+	if cfg.Persistence.Postgres.DSN != "postgres://user:pass@db.example.com:5432/agentos?sslmode=disable" {
+		t.Fatalf("expected postgres dsn override, got %q", cfg.Persistence.Postgres.DSN)
+	}
+}

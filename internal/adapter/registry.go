@@ -6,6 +6,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/dongowu/agentos/internal/adapters/llm"
 	"github.com/dongowu/agentos/internal/messaging"
 	"github.com/dongowu/agentos/internal/persistence"
 	"github.com/dongowu/agentos/pkg/config"
@@ -20,11 +21,15 @@ type TaskRepoFactory func(ctx context.Context, cfg config.PersistenceConfig) (pe
 // AuditLogStoreFactory creates an AuditLogStore from persistence config.
 type AuditLogStoreFactory func(ctx context.Context, cfg config.PersistenceConfig) (persistence.AuditLogStore, error)
 
+// LLMProviderFactory creates an LLM provider from config and may return a default model name.
+type LLMProviderFactory func(cfg config.LLMConfig) (llm.Provider, string, error)
+
 var (
 	mu             sync.RWMutex
 	busFactories   = map[string]EventBusFactory{}
 	repoFactories  = map[string]TaskRepoFactory{}
 	auditFactories = map[string]AuditLogStoreFactory{}
+	llmFactories   = map[string]LLMProviderFactory{}
 )
 
 // RegisterEventBus registers an EventBus factory under the given name.
@@ -60,6 +65,16 @@ func RegisterAuditLogStore(name string, factory AuditLogStoreFactory) {
 	auditFactories[name] = factory
 }
 
+// RegisterLLMProvider registers an LLM provider factory under the given name.
+func RegisterLLMProvider(name string, factory LLMProviderFactory) {
+	mu.Lock()
+	defer mu.Unlock()
+	if _, dup := llmFactories[name]; dup {
+		panic(fmt.Sprintf("adapter: duplicate LLM provider registration: %s", name))
+	}
+	llmFactories[name] = factory
+}
+
 // NewEventBus looks up the registered factory for cfg.Provider and creates an EventBus.
 func NewEventBus(cfg config.MessagingConfig) (messaging.EventBus, error) {
 	mu.RLock()
@@ -93,6 +108,17 @@ func NewAuditLogStore(ctx context.Context, cfg config.PersistenceConfig) (persis
 	return factory(ctx, cfg)
 }
 
+// NewLLMProvider looks up the registered factory for cfg.Provider and creates an LLM provider.
+func NewLLMProvider(cfg config.LLMConfig) (llm.Provider, string, error) {
+	mu.RLock()
+	factory, ok := llmFactories[cfg.Provider]
+	mu.RUnlock()
+	if !ok {
+		return nil, "", fmt.Errorf("adapter: unknown LLM provider %q (registered: %v)", cfg.Provider, RegisteredLLMProviderNames())
+	}
+	return factory(cfg)
+}
+
 // RegisteredEventBusNames returns sorted names of all registered EventBus factories.
 func RegisteredEventBusNames() []string {
 	mu.RLock()
@@ -123,6 +149,18 @@ func RegisteredAuditLogStoreNames() []string {
 	defer mu.RUnlock()
 	names := make([]string, 0, len(auditFactories))
 	for name := range auditFactories {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// RegisteredLLMProviderNames returns sorted names of all registered LLM provider factories.
+func RegisteredLLMProviderNames() []string {
+	mu.RLock()
+	defer mu.RUnlock()
+	names := make([]string, 0, len(llmFactories))
+	for name := range llmFactories {
 		names = append(names, name)
 	}
 	sort.Strings(names)

@@ -43,7 +43,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	api := access.NewTaskSubmissionAPIImpl(app.Engine)
+	api := access.NewTaskSubmissionAPIImpl(app.Engine).WithAuditStore(app.Audit)
 	gw := gateway.NewHandler(api)
 	gw.AgentManager = agentLookupAdapter{mgr: app.AgentManager}
 

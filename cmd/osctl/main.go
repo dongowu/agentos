@@ -10,13 +10,15 @@ import (
 )
 
 func main() {
-	app, err := bootstrap.FromEnv(context.Background())
-	if err != nil {
-		log.Fatal(err)
-	}
-	api := access.NewTaskSubmissionAPIImpl(app.Engine)
+	root := cli.Root(func() (access.TaskSubmissionAPI, error) {
+		app, err := bootstrap.FromEnv(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		return access.NewTaskSubmissionAPIImpl(app.Engine).WithAuditStore(app.Audit), nil
+	})
 
-	if err := cli.Root(api).Execute(); err != nil {
+	if err := root.Execute(); err != nil {
 		log.Fatal(err)
 	}
 }

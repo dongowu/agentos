@@ -3,10 +3,12 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/dongowu/agentos/internal/actionbridge"
 	"github.com/dongowu/agentos/internal/runtimeclient"
 	"github.com/dongowu/agentos/internal/worker"
 	"github.com/dongowu/agentos/pkg/taskdsl"
@@ -268,5 +270,31 @@ func TestLocalScheduler_WithRealPool(t *testing.T) {
 	}
 	if string(r.Stdout) != "hello" {
 		t.Errorf("expected stdout 'hello', got %q", r.Stdout)
+	}
+}
+
+func TestLocalScheduler_BridgeExecutesWithoutWorker(t *testing.T) {
+	pool := &fakePool{selErr: errors.New("no available workers")}
+	sched := NewLocalScheduler(pool).WithActionBridge(actionbridge.New())
+	path := filepath.Join(t.TempDir(), "bridge.txt")
+
+	if err := sched.Submit(context.Background(), "task-1", &taskdsl.Action{ID: "act-bridge", Kind: "file.write", Payload: map[string]any{"path": path, "content": "bridge"}}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	select {
+	case result := <-sched.Results():
+		if result.WorkerID != "control-plane" {
+			t.Fatalf("expected control-plane worker id, got %q", result.WorkerID)
+		}
+		if result.ExitCode != 0 {
+			t.Fatalf("expected exit code 0, got %d", result.ExitCode)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for result")
+	}
+
+	if len(pool.getExecLog()) != 0 {
+		t.Fatalf("expected no worker execution, got %d", len(pool.getExecLog()))
 	}
 }

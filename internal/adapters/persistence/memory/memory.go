@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/dongowu/agentos/internal/adapter"
@@ -106,6 +107,54 @@ func (s *AuditLogStore) ListByTask(ctx context.Context, taskID string) ([]persis
 		out = append(out, s.records[key])
 	}
 	return out, nil
+}
+
+// Query implements persistence.AuditLogStore.
+func (s *AuditLogStore) Query(ctx context.Context, query persistence.AuditQuery) ([]persistence.AuditRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]persistence.AuditRecord, 0, len(s.records))
+	for _, record := range s.records {
+		if !matchAuditQuery(record, query) {
+			continue
+		}
+		out = append(out, record)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].OccurredAt.Equal(out[j].OccurredAt) {
+			if out[i].TaskID == out[j].TaskID {
+				return out[i].ActionID > out[j].ActionID
+			}
+			return out[i].TaskID > out[j].TaskID
+		}
+		return out[i].OccurredAt.After(out[j].OccurredAt)
+	})
+	if query.Limit > 0 && len(out) > query.Limit {
+		out = out[:query.Limit]
+	}
+	return out, nil
+}
+
+func matchAuditQuery(record persistence.AuditRecord, query persistence.AuditQuery) bool {
+	if query.TaskID != "" && record.TaskID != query.TaskID {
+		return false
+	}
+	if query.ActionID != "" && record.ActionID != query.ActionID {
+		return false
+	}
+	if query.TenantID != "" && record.TenantID != query.TenantID {
+		return false
+	}
+	if query.AgentName != "" && record.AgentName != query.AgentName {
+		return false
+	}
+	if query.WorkerID != "" && record.WorkerID != query.WorkerID {
+		return false
+	}
+	if query.FailedOnly && record.Error == "" && record.ExitCode == 0 {
+		return false
+	}
+	return true
 }
 
 func auditKey(taskID, actionID string) string {

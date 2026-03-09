@@ -3,6 +3,8 @@ package orchestration
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/dongowu/agentos/internal/adapters/llm"
@@ -11,11 +13,22 @@ import (
 
 // mockProvider is a test double for llm.Provider.
 type mockProvider struct {
-	response *llm.Response
-	err      error
+	response  *llm.Response
+	err       error
+	responses []*llm.Response
+	errs      []error
+	requests  []llm.Request
 }
 
-func (m *mockProvider) Chat(_ context.Context, _ llm.Request) (*llm.Response, error) {
+func (m *mockProvider) Chat(_ context.Context, req llm.Request) (*llm.Response, error) {
+	m.requests = append(m.requests, req)
+	index := len(m.requests) - 1
+	if len(m.errs) > index && m.errs[index] != nil {
+		return nil, m.errs[index]
+	}
+	if len(m.responses) > index && m.responses[index] != nil {
+		return m.responses[index], nil
+	}
 	return m.response, m.err
 }
 
@@ -79,28 +92,21 @@ func TestLLMPlanner_Plan_JSONInMarkdownBlock(t *testing.T) {
 	}
 }
 
-func TestLLMPlanner_Plan_InvalidJSON_Fallback(t *testing.T) {
+func TestLLMPlanner_Plan_InvalidJSON_ReturnsMalformedPlanError(t *testing.T) {
 	provider := &mockProvider{
 		response: &llm.Response{Content: "I don't understand the request"},
 	}
 	planner := NewLLMPlanner(provider, "gpt-4")
 
-	result, err := planner.Plan(context.Background(), PlanInput{
+	_, err := planner.Plan(context.Background(), PlanInput{
 		TaskID: "task-3",
 		Prompt: "do something",
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected malformed plan error")
 	}
-	if len(result.Actions) != 1 {
-		t.Fatalf("expected 1 fallback action, got %d", len(result.Actions))
-	}
-	if result.Actions[0].Kind != "command.exec" {
-		t.Errorf("expected fallback kind command.exec, got %s", result.Actions[0].Kind)
-	}
-	cmd, ok := result.Actions[0].Payload["cmd"].(string)
-	if !ok || cmd != "do something" {
-		t.Errorf("expected fallback cmd 'do something', got %v", result.Actions[0].Payload["cmd"])
+	if !errors.Is(err, ErrMalformedPlan) {
+		t.Fatalf("expected ErrMalformedPlan, got %v", err)
 	}
 }
 
@@ -119,7 +125,7 @@ func TestLLMPlanner_Plan_ProviderError(t *testing.T) {
 	}
 }
 
-func TestLLMPlanner_Plan_EmptyActions_Fallback(t *testing.T) {
+func TestLLMPlanner_Plan_EmptyActions_ReturnsMalformedPlanError(t *testing.T) {
 	plan := taskdsl.Plan{Actions: []taskdsl.Action{}}
 	planJSON, _ := json.Marshal(plan)
 
@@ -128,15 +134,98 @@ func TestLLMPlanner_Plan_EmptyActions_Fallback(t *testing.T) {
 	}
 	planner := NewLLMPlanner(provider, "gpt-4")
 
-	result, err := planner.Plan(context.Background(), PlanInput{
+	_, err := planner.Plan(context.Background(), PlanInput{
 		TaskID: "task-5",
 		Prompt: "nothing",
 	})
+	if err == nil {
+		t.Fatal("expected malformed plan error")
+	}
+	if !errors.Is(err, ErrMalformedPlan) {
+		t.Fatalf("expected ErrMalformedPlan, got %v", err)
+	}
+}
+
+func TestLLMPlanner_Plan_ExtractsJSONFromMixedContent(t *testing.T) {
+	provider := &mockProvider{
+		response: &llm.Response{Content: "I will create a plan now.\n```json\n{\"Actions\":[{\"Kind\":\"command.exec\",\"Payload\":{\"cmd\":\"echo hello\"}}]}\n```"},
+	}
+	planner := NewLLMPlanner(provider, "gpt-4")
+
+	result, err := planner.Plan(context.Background(), PlanInput{TaskID: "task-mixed", Prompt: "echo hello"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Empty actions should fall back to a single action.
 	if len(result.Actions) != 1 {
-		t.Fatalf("expected 1 fallback action for empty plan, got %d", len(result.Actions))
+		t.Fatalf("expected 1 action, got %d", len(result.Actions))
+	}
+	if result.Actions[0].ID == "" {
+		t.Fatal("expected normalized action id")
+	}
+	if result.Actions[0].RuntimeEnv == "" {
+		t.Fatal("expected normalized runtime env")
+	}
+}
+
+func TestLLMPlanner_Plan_AcceptsBareActionArray(t *testing.T) {
+	provider := &mockProvider{
+		response: &llm.Response{Content: `[{"Kind":"command.exec","Payload":{"cmd":"echo one"}},{"Kind":"file.read","Payload":{"path":"/tmp/in.txt"}}]`},
+	}
+	planner := NewLLMPlanner(provider, "gpt-4")
+
+	result, err := planner.Plan(context.Background(), PlanInput{TaskID: "task-array", Prompt: "echo one then read /tmp/in.txt"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.Actions) != 2 {
+		t.Fatalf("expected 2 actions, got %d", len(result.Actions))
+	}
+	if result.Actions[1].Kind != "file.read" {
+		t.Fatalf("expected file.read, got %q", result.Actions[1].Kind)
+	}
+}
+
+func TestLLMPlanner_Plan_RepairsMalformedOutput(t *testing.T) {
+	provider := &mockProvider{responses: []*llm.Response{
+		{Content: "here is the plan: nope"},
+		{Content: `{"Actions":[{"Kind":"command.exec","Payload":{"cmd":"echo repaired"}}]}`},
+	}}
+	planner := NewLLMPlanner(provider, "gpt-4")
+
+	result, err := planner.Plan(context.Background(), PlanInput{TaskID: "task-repair", Prompt: "echo repaired"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(provider.requests) != 2 {
+		t.Fatalf("expected 2 provider calls, got %d", len(provider.requests))
+	}
+	if len(result.Actions) != 1 || result.Actions[0].Kind != "command.exec" {
+		t.Fatalf("unexpected repaired plan: %#v", result)
+	}
+	last := provider.requests[1]
+	if len(last.Messages) == 0 || last.Messages[len(last.Messages)-1].Role != "user" {
+		t.Fatalf("expected repair user prompt, got %#v", last.Messages)
+	}
+	if !strings.Contains(last.Messages[len(last.Messages)-1].Content, "malformed") {
+		t.Fatalf("expected repair prompt to mention malformed output, got %q", last.Messages[len(last.Messages)-1].Content)
+	}
+}
+
+func TestLLMPlanner_Plan_RepairFailureStillReturnsMalformedPlan(t *testing.T) {
+	provider := &mockProvider{responses: []*llm.Response{
+		{Content: "not json"},
+		{Content: "still not json"},
+	}}
+	planner := NewLLMPlanner(provider, "gpt-4")
+
+	_, err := planner.Plan(context.Background(), PlanInput{TaskID: "task-repair-fail", Prompt: "read /tmp/a then write /tmp/b"})
+	if err == nil {
+		t.Fatal("expected malformed plan error")
+	}
+	if !errors.Is(err, ErrMalformedPlan) {
+		t.Fatalf("expected ErrMalformedPlan, got %v", err)
+	}
+	if len(provider.requests) != 2 {
+		t.Fatalf("expected 2 provider calls, got %d", len(provider.requests))
 	}
 }

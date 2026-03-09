@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/dongowu/agentos/internal/access"
@@ -42,19 +43,54 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/v1/audit", s.handleAudit)
 	mux.HandleFunc("/v1/tasks", s.handleTasks)
 	mux.HandleFunc("/v1/tasks/", s.handleTaskByID)
 	if s.Gateway != nil {
-		mux.HandleFunc("/agent/run", s.Gateway.ServeAgentRun)
-		mux.HandleFunc("/agent/status", s.Gateway.ServeAgentStatus)
-		mux.HandleFunc("/agent/list", s.Gateway.ServeAgentList)
-		mux.HandleFunc("/tool/run", s.Gateway.ServeToolRun)
+		mux.HandleFunc("/agent/run", s.withAuthentication(s.Gateway.ServeAgentRun))
+		mux.HandleFunc("/agent/status", s.withAuthentication(s.Gateway.ServeAgentStatus))
+		mux.HandleFunc("/agent/list", s.withAuthentication(s.Gateway.ServeAgentList))
+		mux.HandleFunc("/tool/run", s.withAuthentication(s.Gateway.ServeToolRun))
 	}
 	return mux
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/v1/audit" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	ctx, principal, ok := s.authenticateRequest(w, r)
+	if !ok {
+		return
+	}
+	r = r.WithContext(ctx)
+	if s.Audit == nil {
+		http.Error(w, `{"error":"audit store not configured"}`, http.StatusInternalServerError)
+		return
+	}
+	query, err := auditQueryFromRequest(r)
+	if err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+		return
+	}
+	if principal != nil && principal.TenantID != "" {
+		query.TenantID = principal.TenantID
+	}
+	records, err := s.Audit.Query(r.Context(), query)
+	if err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"records": records})
 }
 
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +142,10 @@ func (s *Server) handleTaskByID(w http.ResponseWriter, r *http.Request) {
 		s.handleTaskAudit(w, r, taskID)
 		return
 	}
+	if taskID, ok := parseTaskReplayPath(path); ok {
+		s.handleTaskReplay(w, r, taskID)
+		return
+	}
 	s.handleGetTask(w, r, path)
 }
 
@@ -155,6 +195,18 @@ func parseTaskAuditPath(path string) (taskID string, ok bool) {
 	return taskID, true
 }
 
+func parseTaskReplayPath(path string) (taskID string, ok bool) {
+	if !strings.HasSuffix(path, "/replay") {
+		return "", false
+	}
+	taskID = strings.TrimSuffix(path, "/replay")
+	taskID = strings.TrimSuffix(taskID, "/")
+	if taskID == "" || strings.Contains(taskID, "/") {
+		return "", false
+	}
+	return taskID, true
+}
+
 func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if s.API == nil {
 		http.Error(w, `{"error":"api not configured"}`, http.StatusInternalServerError)
@@ -194,6 +246,9 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request, taskID st
 		http.Error(w, `{"error":"api not configured"}`, http.StatusInternalServerError)
 		return
 	}
+	if _, ok := s.authorizeTaskRead(w, r, taskID); !ok {
+		return
+	}
 	resp, err := s.API.GetTask(r.Context(), taskID)
 	if err != nil {
 		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusNotFound)
@@ -205,6 +260,9 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request, taskID st
 func (s *Server) handleTaskAudit(w http.ResponseWriter, r *http.Request, taskID string) {
 	if s.API == nil {
 		http.Error(w, `{"error":"api not configured"}`, http.StatusInternalServerError)
+		return
+	}
+	if _, ok := s.authorizeTaskRead(w, r, taskID); !ok {
 		return
 	}
 	if s.Audit == nil {
@@ -228,6 +286,9 @@ func (s *Server) handleActionAudit(w http.ResponseWriter, r *http.Request, taskI
 		http.Error(w, `{"error":"api not configured"}`, http.StatusInternalServerError)
 		return
 	}
+	if _, ok := s.authorizeTaskRead(w, r, taskID); !ok {
+		return
+	}
 	if s.Audit == nil {
 		http.Error(w, `{"error":"audit store not configured"}`, http.StatusInternalServerError)
 		return
@@ -248,6 +309,27 @@ func (s *Server) handleActionAudit(w http.ResponseWriter, r *http.Request, taskI
 	writeJSON(w, http.StatusOK, record)
 }
 
+func (s *Server) handleTaskReplay(w http.ResponseWriter, r *http.Request, taskID string) {
+	if s.API == nil {
+		http.Error(w, `{"error":"api not configured"}`, http.StatusInternalServerError)
+		return
+	}
+	if _, ok := s.authorizeTaskRead(w, r, taskID); !ok {
+		return
+	}
+	replayAPI, ok := s.API.(access.TaskReplayAPI)
+	if !ok {
+		http.Error(w, `{"error":"task replay api not configured"}`, http.StatusInternalServerError)
+		return
+	}
+	replay, err := replayAPI.GetTaskReplay(r.Context(), taskID)
+	if err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, replay)
+}
+
 type taskStreamEvent struct {
 	topic   string
 	payload any
@@ -258,8 +340,7 @@ func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request, taskID
 		http.Error(w, `{"error":"api not configured"}`, http.StatusInternalServerError)
 		return
 	}
-	if s.Bus == nil {
-		http.Error(w, `{"error":"event bus not configured"}`, http.StatusInternalServerError)
+	if _, ok := s.authorizeTaskRead(w, r, taskID); !ok {
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -272,6 +353,19 @@ func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request, taskID
 		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusNotFound)
 		return
 	}
+	auditRecords := []persistence.AuditRecord{}
+	if s.Audit != nil {
+		auditRecords, err = s.Audit.ListByTask(r.Context(), taskID)
+		if err != nil {
+			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			return
+		}
+	}
+	terminal := isTerminalTaskState(state.State)
+	if !terminal && s.Bus == nil {
+		http.Error(w, `{"error":"event bus not configured"}`, http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -280,7 +374,15 @@ func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request, taskID
 	if err := writeSSEEvent(w, "task.snapshot", state); err != nil {
 		return
 	}
+	for _, record := range auditRecords {
+		if err := writeAuditReplayRecord(w, record.TaskID, record.ActionID, record); err != nil {
+			return
+		}
+	}
 	flusher.Flush()
+	if terminal {
+		return
+	}
 
 	eventsCh := make(chan taskStreamEvent, 32)
 	unsubscribers := make([]func(), 0, 5)
@@ -333,8 +435,7 @@ func (s *Server) handleActionStream(w http.ResponseWriter, r *http.Request, task
 		http.Error(w, `{"error":"api not configured"}`, http.StatusInternalServerError)
 		return
 	}
-	if s.Bus == nil {
-		http.Error(w, `{"error":"event bus not configured"}`, http.StatusInternalServerError)
+	if _, ok := s.authorizeTaskRead(w, r, taskID); !ok {
 		return
 	}
 	flusher, ok := w.(http.Flusher)
@@ -346,31 +447,30 @@ func (s *Server) handleActionStream(w http.ResponseWriter, r *http.Request, task
 		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusNotFound)
 		return
 	}
+	var auditRecord *persistence.AuditRecord
+	if s.Audit != nil {
+		record, err := s.Audit.Get(r.Context(), taskID, actionID)
+		if err != nil {
+			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			return
+		}
+		auditRecord = record
+	}
+	if auditRecord == nil && s.Bus == nil {
+		http.Error(w, `{"error":"event bus not configured"}`, http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
-
-	if s.Audit != nil {
-		record, err := s.Audit.Get(r.Context(), taskID, actionID)
-		if err == nil && record != nil {
-			if record.Stdout != "" {
-				if err := writeSSEEvent(w, "task.action.output", &events.ActionOutputChunk{TaskID: taskID, ActionID: actionID, Kind: "stdout", Data: []byte(record.Stdout), Text: record.Stdout, Occurred: record.OccurredAt}); err != nil {
-					return
-				}
-			}
-			if record.Stderr != "" {
-				if err := writeSSEEvent(w, "task.action.output", &events.ActionOutputChunk{TaskID: taskID, ActionID: actionID, Kind: "stderr", Data: []byte(record.Stderr), Text: record.Stderr, Occurred: record.OccurredAt}); err != nil {
-					return
-				}
-			}
-			if err := writeSSEEvent(w, "task.action.completed", &events.ActionCompleted{TaskID: taskID, ActionID: actionID, ExitCode: record.ExitCode, WorkerID: record.WorkerID, Error: record.Error, Occurred: record.OccurredAt}); err != nil {
-				return
-			}
-			flusher.Flush()
+	if auditRecord != nil {
+		if err := writeAuditReplayRecord(w, taskID, actionID, *auditRecord); err != nil {
 			return
 		}
+		flusher.Flush()
+		return
 	}
 
 	eventsCh := make(chan taskStreamEvent, 16)
@@ -425,6 +525,61 @@ func (s *Server) handleActionStream(w http.ResponseWriter, r *http.Request, task
 	}
 }
 
+func isTerminalTaskState(state string) bool {
+	switch state {
+	case "succeeded", "failed":
+		return true
+	default:
+		return false
+	}
+}
+
+func writeAuditReplayRecord(w http.ResponseWriter, taskID, actionID string, record persistence.AuditRecord) error {
+	if record.Stdout != "" {
+		if err := writeSSEEvent(w, "task.action.output", &events.ActionOutputChunk{TaskID: taskID, ActionID: actionID, Kind: "stdout", Data: []byte(record.Stdout), Text: record.Stdout, Occurred: record.OccurredAt}); err != nil {
+			return err
+		}
+	}
+	if record.Stderr != "" {
+		if err := writeSSEEvent(w, "task.action.output", &events.ActionOutputChunk{TaskID: taskID, ActionID: actionID, Kind: "stderr", Data: []byte(record.Stderr), Text: record.Stderr, Occurred: record.OccurredAt}); err != nil {
+			return err
+		}
+	}
+	return writeSSEEvent(w, "task.action.completed", &events.ActionCompleted{TaskID: taskID, ActionID: actionID, ExitCode: record.ExitCode, Stdout: record.Stdout, Stderr: record.Stderr, WorkerID: record.WorkerID, Error: record.Error, Occurred: record.OccurredAt})
+}
+
+func (s *Server) authorizeTaskRead(w http.ResponseWriter, r *http.Request, taskID string) (*access.TaskDetail, bool) {
+	principal, hasPrincipal := access.PrincipalFromContext(r.Context())
+	if !hasPrincipal || principal == nil || principal.TenantID == "" {
+		return nil, true
+	}
+	getter, ok := s.API.(access.TaskDetailAPI)
+	if !ok {
+		http.Error(w, `{"error":"task detail api not configured"}`, http.StatusInternalServerError)
+		return nil, false
+	}
+	detail, err := getter.GetTaskDetail(r.Context(), taskID)
+	if err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusNotFound)
+		return nil, false
+	}
+	if detail != nil && detail.TenantID != "" && detail.TenantID != principal.TenantID {
+		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		return nil, false
+	}
+	return detail, true
+}
+
+func (s *Server) withAuthentication(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, _, ok := s.authenticateRequest(w, r)
+		if !ok {
+			return
+		}
+		next(w, r.WithContext(ctx))
+	}
+}
+
 func (s *Server) authenticateRequest(w http.ResponseWriter, r *http.Request) (context.Context, *access.Principal, bool) {
 	if s.Auth == nil {
 		return r.Context(), nil, true
@@ -441,6 +596,33 @@ func (s *Server) authenticateRequest(w http.ResponseWriter, r *http.Request) (co
 	}
 	ctx := access.WithPrincipal(r.Context(), principal)
 	return ctx, principal, true
+}
+
+func auditQueryFromRequest(r *http.Request) (persistence.AuditQuery, error) {
+	query := persistence.AuditQuery{
+		TaskID:    r.URL.Query().Get("task_id"),
+		ActionID:  r.URL.Query().Get("action_id"),
+		TenantID:  r.URL.Query().Get("tenant_id"),
+		AgentName: r.URL.Query().Get("agent_name"),
+		WorkerID:  r.URL.Query().Get("worker_id"),
+	}
+	if failed := r.URL.Query().Get("failed"); failed != "" {
+		if failed == "true" || failed == "1" {
+			query.FailedOnly = true
+		} else if failed == "false" || failed == "0" {
+			query.FailedOnly = false
+		} else {
+			return persistence.AuditQuery{}, fmt.Errorf("invalid failed value")
+		}
+	}
+	if limit := r.URL.Query().Get("limit"); limit != "" {
+		value, err := strconv.Atoi(limit)
+		if err != nil || value < 0 {
+			return persistence.AuditQuery{}, fmt.Errorf("invalid limit value")
+		}
+		query.Limit = value
+	}
+	return query, nil
 }
 
 func bearerToken(header string) (string, bool) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 
+	"github.com/dongowu/agentos/internal/actionbridge"
 	"github.com/dongowu/agentos/internal/runtimeclient"
 	"github.com/dongowu/agentos/pkg/taskdsl"
 )
@@ -24,6 +25,7 @@ type LocalScheduler struct {
 	pool       WorkerPool
 	results    chan ActionResult
 	outputHook func(runtimeclient.StreamChunk)
+	bridge     *actionbridge.Bridge
 }
 
 // NewLocalScheduler creates a scheduler that dispatches via the worker pool.
@@ -40,17 +42,42 @@ func (s *LocalScheduler) WithOutputHook(hook func(runtimeclient.StreamChunk)) *L
 	return s
 }
 
+// WithActionBridge attaches a local control-plane bridge for tool-style actions.
+func (s *LocalScheduler) WithActionBridge(bridge *actionbridge.Bridge) *LocalScheduler {
+	s.bridge = bridge
+	return s
+}
+
 // Submit selects the least-loaded worker and dispatches the action.
 // Execution runs in a goroutine; the result is sent to Results().
 func (s *LocalScheduler) Submit(ctx context.Context, taskID string, action *taskdsl.Action) error {
+	dispatchCtx := context.WithoutCancel(ctx)
+	if s.bridge != nil && s.bridge.CanExecute(action) {
+		go s.dispatchBridge(dispatchCtx, taskID, action)
+		return nil
+	}
 	workerID, err := s.pool.SelectWorker(ctx)
 	if err != nil {
 		return err
 	}
-
-	dispatchCtx := context.WithoutCancel(ctx)
 	go s.dispatch(dispatchCtx, workerID, taskID, action)
 	return nil
+}
+
+func (s *LocalScheduler) dispatchBridge(ctx context.Context, taskID string, action *taskdsl.Action) {
+	result, err := s.bridge.Execute(ctx, taskID, action, s.outputHook)
+	ar := ActionResult{
+		TaskID:   taskID,
+		ActionID: action.ID,
+		WorkerID: actionbridge.ControlPlaneWorkerID,
+		Error:    err,
+	}
+	if result != nil {
+		ar.ExitCode = result.ExitCode
+		ar.Stdout = result.Stdout
+		ar.Stderr = result.Stderr
+	}
+	s.results <- ar
 }
 
 func (s *LocalScheduler) dispatch(ctx context.Context, workerID, taskID string, action *taskdsl.Action) {

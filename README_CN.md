@@ -64,7 +64,7 @@
 | **Access 接入层** | HTTP API、CLI、网关 | 已实现 |
 | **Agent Brain 智脑层** | LLM Planner（OpenAI 兼容）、Agent YAML DSL | 已实现 |
 | **Task Engine 任务引擎** | 状态机、生命周期流转 | 已实现 |
-| **Skill System 技能系统** | Tool 注册表、7 个内置工具、SchemaAware | 已实现 |
+| **Skill System 技能系统** | Tool 注册表、7 个内置工具、SchemaAware、面向 file/http 类 action 的执行桥接 | 已实现 |
 | **Policy Engine 策略引擎** | 允许/拒绝规则、自治级别、凭证隔离 | 已实现 |
 | **Runtime 运行时** | Rust Worker、NativeRuntime、DockerRuntime、SecurityPolicy | 已实现 |
 | **Scheduler 调度器** | Worker 注册、健康监测、NATS 队列、Worker 池 | 已实现 |
@@ -92,17 +92,49 @@ go run ./cmd/osctl submit "echo hello"
 ```bash
 export AGENTOS_MODE=dev \
        AGENTOS_WORKER_ADDR=localhost:50051 \
+       AGENTOS_LLM_PROVIDER=openai \
        AGENTOS_LLM_API_KEY=sk-xxx \
        AGENTOS_LLM_BASE_URL=https://api.openai.com \
        AGENTOS_LLM_MODEL=gpt-4o
 go run ./cmd/osctl submit "创建一个 hello world Python 脚本"
 ```
 
-HTTP 网关当前暴露 `/health`、`/agent/run`、`/agent/status`、`/agent/list`、`/tool/run`、用于任务级 SSE 遥测的 `GET /v1/tasks/{task_id}/stream`、用于动作实时 stdout/stderr 流的 `GET /v1/tasks/{task_id}/actions/{action_id}/stream`、用于任务审计记录查询的 `GET /v1/tasks/{task_id}/audit`，以及用于单个 action 审计记录查询的 `GET /v1/tasks/{task_id}/actions/{action_id}/audit`。
+Planner 后端现在通过注册表解析。当前内置 `openai`，后续接入其他 OpenAI 兼容或新 provider 时，不需要再修改 bootstrap 主链路。
 
-现在任务遥测会包含实时 `task.action.output` chunk 事件；Native 与 Docker runtime 都支持增量流式输出。当 action 完成后，audit store 会持久化最终 command、exit code、worker id、stdout、stderr，因此动作流接口可以回放已完成动作的结果快照，audit 接口也能提供持久化执行记录。
+如果要让 `osctl` 走远端 API：
 
-如果要跑真实三进程验收（`controller + apiserver + worker`，并验证 audit 闭环），可直接执行：
+```bash
+export AGENTOS_AUTH_TOKEN=acceptance-token
+go run ./cmd/osctl --server http://localhost:8080 submit "echo hello"
+go run ./cmd/osctl --server http://localhost:8080 --token acceptance-token status task-123
+```
+
+当设置 `--server`（或 `AGENTOS_SERVER_URL`）后，`osctl` 不再本地 bootstrap，而是直接调用远端 `/v1/tasks` API；`--token` 默认读取 `AGENTOS_AUTH_TOKEN`。如果不设置 `--server`，则继续保持现有的本地嵌入式模式。
+
+如果你是本地迭代 agent，可以直接使用 gateway CLI：
+
+```bash
+claw --server http://localhost:8080 dev
+claw --server http://localhost:8080 dev agents/demo.yaml "echo hello"
+
+# 如果 gateway 启用了鉴权
+export AGENTOS_AUTH_TOKEN=acceptance-token
+claw --server http://localhost:8080 dev
+claw --server http://localhost:8080 run agents/demo.yaml "echo hello"
+claw --server http://localhost:8080 --token acceptance-token status task-123
+```
+
+不带参数时会检查 `/health` 和 `/agent/list`；带上 `agent.yaml + task` 时会加载本地 agent 配置并通过 `/agent/run` 发起任务。如果 gateway 启用了 Bearer 鉴权，`claw-cli` 支持 `--token` 或 `AGENTOS_AUTH_TOKEN`。
+
+HTTP 网关当前暴露 `/health`、`/agent/run`、`/agent/status`、`/agent/list`、`/tool/run`、用于平台级审计查询的 `GET /v1/audit`、用于任务级 SSE 遥测的 `GET /v1/tasks/{task_id}/stream`、用于动作实时 stdout/stderr 流的 `GET /v1/tasks/{task_id}/actions/{action_id}/stream`、用于任务审计记录查询的 `GET /v1/tasks/{task_id}/audit`、用于单个 action 审计记录查询的 `GET /v1/tasks/{task_id}/actions/{action_id}/audit`，以及用于任务级回放投影的 `GET /v1/tasks/{task_id}/replay`（聚合 task 元数据、计划动作与持久化 audit 结果）。当启用 Bearer 鉴权后，`/v1/tasks*` 与 gateway 路由都会统一要求 `Authorization: Bearer ...` 请求头。对于 `/agent/run`，控制面现在会保留 `agent_name`，并让已加载的 agent 配置参与 planner prompt 组装，而不再只是透传原始 task 文本。
+
+现在任务遥测会包含实时 `task.action.output` chunk 事件；Native 与 Docker runtime 都支持增量流式输出。当 action 完成后，audit store 会持久化最终 command、exit code、worker id、stdout、stderr，因此动作流接口可以回放已完成动作的结果快照，任务流接口也会在已结束任务上补发持久化的 action output / completed 事件，`/v1/audit` 则能提供按租户收敛的平台级审计 feed；不过这仍然是 API 级审计中心能力，还不是完整的控制台 UI。
+
+LLM planner 现在把“格式错误的计划”视为可恢复路径：先请求 provider 对坏 JSON 做一次修复；如果修复仍失败，则返回 `ErrMalformedPlan`，并让外层 fallback planner 直接切回 `PromptPlanner`，而不是在非瞬时错误上继续浪费重试次数。
+
+现在 tool-like action 不再必须先退化成 shell 命令才能运行。`file.read`、`file.write`、直接 tool kind，以及 `http.request`（当前桥接到 `http.get` / `http.post`）可以通过 Go 控制面的 tool bridge 执行；`command.exec` 仍走 Rust worker。浏览器类专用执行仍是后续缺口。
+
+如果要跑真实三进程验收（`controller + apiserver + worker`，覆盖共享注册、Bearer 鉴权、多步执行与 audit 闭环），可直接执行：
 
 ```bash
 ./scripts/acceptance.sh
@@ -201,7 +233,7 @@ agentos/
 | `EventBus` | memory, nats | nats（生产）/ memory（开发） |
 | `TaskRepository` | memory, postgres | postgres（生产）/ memory（开发） |
 | `AuditLogStore` | memory, postgres | postgres（生产）/ memory（开发） |
-| `Planner` | prompt, openai (LLM) | 默认 prompt 回退；配置 LLM 后启用 OpenAI + retry/fallback 流水线 |
+| `Planner` | prompt、基于注册表的 LLM provider（内置 `openai`） | 默认 prompt planner；LLM planner 对瞬时错误做有限重试，对非法 JSON 先做一次修复，再回退到 `PromptPlanner` |
 | `Memory.Provider` | inmemory, redis | inmemory |
 | `RuntimeAdapter` (Rust) | native, docker | native |
 | `Scheduler` | local, nats | nats（生产）/ local（开发） |
@@ -209,7 +241,7 @@ agentos/
 ```go
 app, err := bootstrap.FromEnv(ctx)
 // AGENTOS_MODE=dev  -> 内存适配器 + 本地调度器 + prompt planner
-// AGENTOS_MODE=prod -> nats + postgres + nats 调度 + 配置 API key 时启用 OpenAI planner
+// AGENTOS_MODE=prod -> nats + postgres + nats 调度 + 按配置启用的注册表式 LLM planner
 ```
 
 ## 安全模型
@@ -269,16 +301,20 @@ app, err := bootstrap.FromEnv(ctx)
 | `AGENTOS_WORKER_ADDR` | 开发/直连执行时使用的 Rust Worker gRPC 地址 | localhost:50051 |
 | `AGENTOS_CONTROL_PLANE_ADDR` | 共享 controller 注册中心地址，用于远程 worker 发现 | — |
 | `AGENTOS_SCHEDULER_MODE` | `local` 或 `nats` | 生产：`nats`，开发：`local` |
+| `AGENTOS_NATS_URL` | 消息/调度适配器使用的 NATS 服务地址 | nats://localhost:4222 |
+| `AGENTOS_NATS_STREAM` | JetStream stream 名称 | AGENTOS |
+| `AGENTOS_POSTGRES_DSN` | 持久化适配器使用的 PostgreSQL DSN | postgres://agentos:agentos@localhost:5432/agentos?sslmode=disable |
 | `AGENTOS_API_LISTEN_ADDR` | API 服务监听地址 | :8080 |
-| `AGENTOS_LLM_API_KEY` | LLM API 密钥（启用 OpenAI planner 流水线） | — |
-| `AGENTOS_LLM_BASE_URL` | LLM API 基础 URL | https://api.openai.com |
+| `AGENTOS_LLM_PROVIDER` | 从 LLM 适配器注册表解析的 planner provider 名称 | 开发模式有 API key 时默认为 openai，否则为 stub |
+| `AGENTOS_LLM_API_KEY` | LLM API 密钥（启用当前配置的 planner provider） | — |
+| `AGENTOS_LLM_BASE_URL` | OpenAI 兼容 provider 的 LLM API 基础 URL | https://api.openai.com |
 | `AGENTOS_LLM_MODEL` | LLM 模型名 | gpt-4o |
 | `AGENTOS_RUNTIME` | Worker 运行时：native 或 docker | native |
 | `AGENTOS_SECURITY_LEVEL` | supervised / semi / autonomous | supervised |
 | `AGENTOS_DOCKER_IMAGE` | Docker 沙箱镜像 | ubuntu:22.04 |
 | `AGENTOS_MAX_CONCURRENT_TASKS` | Worker 并发上限 | 4 |
 | `AGENTOS_AGENT_SECRETS` | Agent 密钥映射（`agent=secret,agent2=secret2`），用于注入不透明 token | — |
-| `AGENTOS_AUTH_TOKENS` | Bearer 鉴权映射（`token=subject|tenant|role1;role2`），保护 `/v1/tasks*` 接口 | — |
+| `AGENTOS_AUTH_TOKENS` | Bearer 鉴权映射（`token=subject|tenant|role1;role2`），保护 `/v1/tasks*` 与 gateway 路由 | — |
 
 ## 测试
 
@@ -298,7 +334,17 @@ cd runtime && cargo test --workspace
 | Stage 2: 智能体系 | LLM planner 流水线、Agent YAML DSL、工具、记忆 | 已完成 |
 | Stage 3: 沙箱与安全 | Docker 隔离、SecurityPolicy、PolicyEngine | 已完成 |
 | Stage 4: 分布式调度 | Worker 注册、NATS 调度、Worker 池 | 已完成 |
-| Stage 5: 商业化平台 | Web UI (Claw Studio)、SDK、Agent 市场 | 规划中 |
+| Stage 5: 平台体验与生态 | 控制台、SDK、扩展能力 | 规划中 |
+
+## Open Core 边界
+
+AgentOS 将仓库核心以 **Apache-2.0** 方式公开，并把企业增强和托管云能力放在仓库核心边界之外。
+
+- **Community**：开源、自部署的控制面、运行时、调度、audit 与 telemetry API
+- **Enterprise**：组织治理、SSO / SCIM / RBAC、审计中心、长周期保留、支持服务
+- **Cloud**：托管控制面、控制台、升级运维、计费与 SLA
+
+对外公开的仓库重点是 **Community** 核心：可自部署的执行底座、编排契约、调度、审计与遥测能力。许可证与边界说明见 `docs/strategy/licensing-decision.md`。
 
 ## 文档
 
@@ -310,11 +356,13 @@ cd runtime && cargo test --workspace
 - [技能系统](docs/architecture/skill-system.md)
 - [策略引擎](docs/architecture/policy-engine.md)
 - [MVP 范围](docs/architecture/mvp-scope.md)
+- [许可证决策](docs/strategy/licensing-decision.md)
+- [平台层与能力层边界](docs/architecture/platform-vs-capability-boundary.md)
 
 ## 贡献
 
-参见 [CONTRIBUTING.md](CONTRIBUTING.md) 了解开发环境搭建和贡献指南。
+参见 [CONTRIBUTING.md](CONTRIBUTING.md) 了解开发环境搭建和贡献指南，参见 [SECURITY.md](SECURITY.md) 了解漏洞提交流程，参见 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) 了解社区行为规范。
 
 ## 许可证
 
-AgentOS 是开源项目。具体许可证信息请查看各文件。
+AgentOS 核心仓库采用 [Apache-2.0](LICENSE) 许可证。企业增强模块与托管云服务可以采用独立的商业条款。

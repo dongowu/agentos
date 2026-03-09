@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/dongowu/agentos/internal/actionbridge"
 	"github.com/dongowu/agentos/internal/runtimeclient"
 	"github.com/dongowu/agentos/pkg/taskdsl"
 	"github.com/nats-io/nats.go"
@@ -17,6 +18,7 @@ type NATSDispatcher struct {
 	stream     string
 	pool       WorkerPool
 	outputHook func(runtimeclient.StreamChunk)
+	bridge     *actionbridge.Bridge
 	mu         sync.Mutex
 	sub        subscription
 }
@@ -28,6 +30,12 @@ func NewNATSDispatcher(js jetStreamClient, stream string, pool WorkerPool) *NATS
 // WithOutputHook attaches a callback that receives stdout/stderr chunks as they arrive.
 func (d *NATSDispatcher) WithOutputHook(hook func(runtimeclient.StreamChunk)) *NATSDispatcher {
 	d.outputHook = hook
+	return d
+}
+
+// WithActionBridge attaches a control-plane bridge for tool-like actions.
+func (d *NATSDispatcher) WithActionBridge(bridge *actionbridge.Bridge) *NATSDispatcher {
+	d.bridge = bridge
 	return d
 }
 
@@ -57,6 +65,23 @@ func (d *NATSDispatcher) handleMessage(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 	result := actionResponse{TaskID: req.TaskID, ActionID: req.ActionID}
+	action := &taskdsl.Action{ID: req.ActionID, Kind: req.Kind, Payload: req.Payload, RuntimeEnv: req.Runtime}
+	if d.bridge != nil && d.bridge.CanExecute(action) {
+		execResult, execErr := d.bridge.Execute(ctx, req.TaskID, action, d.outputHook)
+		result.WorkerID = actionbridge.ControlPlaneWorkerID
+		if execErr != nil {
+			result.Error = execErr.Error()
+			d.publishResult(result)
+			return
+		}
+		if execResult != nil {
+			result.ExitCode = execResult.ExitCode
+			result.Stdout = execResult.Stdout
+			result.Stderr = execResult.Stderr
+		}
+		d.publishResult(result)
+		return
+	}
 	workerID, err := d.pool.SelectWorker(ctx)
 	if err != nil {
 		result.Error = err.Error()
@@ -64,7 +89,6 @@ func (d *NATSDispatcher) handleMessage(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 	result.WorkerID = workerID
-	action := &taskdsl.Action{ID: req.ActionID, Kind: req.Kind, Payload: req.Payload, RuntimeEnv: req.Runtime}
 	if streamer, ok := d.pool.(streamingWorkerPool); ok {
 		execResult, execErr := streamer.ExecuteStream(ctx, workerID, req.TaskID, action, d.outputHook)
 		if execErr != nil {

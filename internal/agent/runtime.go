@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/dongowu/agentos/internal/memory"
 	"github.com/dongowu/agentos/internal/tool"
@@ -65,6 +66,30 @@ func (r *AgentRuntime) CheckPolicy(toolName string) error {
 	}
 
 	return fmt.Errorf("tool %q not matched by any allow policy", toolName)
+}
+
+// BuildPrompt renders agent config and the user task into a planner-friendly prompt.
+func (r *AgentRuntime) BuildPrompt(task string) string {
+	if r == nil || r.Config == nil {
+		return strings.TrimSpace(task)
+	}
+	var sections []string
+	sections = append(sections, fmt.Sprintf("Agent: %s", r.Config.Name))
+	if desc := strings.TrimSpace(r.Config.Description); desc != "" {
+		sections = append(sections, fmt.Sprintf("Description: %s", desc))
+	}
+	if model := strings.TrimSpace(r.Config.Model); model != "" {
+		sections = append(sections, fmt.Sprintf("Model: %s", model))
+	}
+	if len(r.Config.Tools) > 0 {
+		sections = append(sections, fmt.Sprintf("Declared tools: %s", strings.Join(r.Config.Tools, ", ")))
+	}
+	if len(r.Config.Workflow) > 0 {
+		sections = append(sections, fmt.Sprintf("Preferred workflow: %s", strings.Join(r.Config.Workflow, " -> ")))
+	}
+	sections = append(sections, fmt.Sprintf("User task: %s", strings.TrimSpace(task)))
+	sections = append(sections, "Follow the agent profile when producing the task plan.")
+	return strings.Join(sections, "\n")
 }
 
 // AvailableTools returns the names of tools declared in this agent's config.

@@ -117,6 +117,58 @@ func TestEngineImpl_StartTaskWithInput_UsesMemoryRecallAndStoresResult(t *testin
 	}
 }
 
+func TestEngineImpl_StartTaskWithInput_PersistsTenantOnTask(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &recordingPlanner{}
+	exec := &recordingExecutor{}
+	engine := NewEngineImpl(repo, bus, planner, nil, exec, nil, nil)
+
+	task, err := engine.StartTaskWithInput(context.Background(), StartTaskInput{
+		Prompt:   "echo hello",
+		TenantID: "tenant-1",
+	})
+	if err != nil {
+		t.Fatalf("StartTaskWithInput: %v", err)
+	}
+	stored, err := repo.Get(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("repo.Get: %v", err)
+	}
+	if stored == nil {
+		t.Fatal("expected persisted task")
+	}
+	if stored.TenantID != "tenant-1" {
+		t.Fatalf("expected tenant-1, got %q", stored.TenantID)
+	}
+}
+
+func TestEngineImpl_StartTaskWithInput_PersistsAgentNameOnTask(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &recordingPlanner{}
+	exec := &recordingExecutor{}
+	engine := NewEngineImpl(repo, bus, planner, nil, exec, nil, nil)
+
+	task, err := engine.StartTaskWithInput(context.Background(), StartTaskInput{
+		Prompt:    "echo hello",
+		AgentName: "agent-1",
+	})
+	if err != nil {
+		t.Fatalf("StartTaskWithInput: %v", err)
+	}
+	stored, err := repo.Get(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("repo.Get: %v", err)
+	}
+	if stored == nil {
+		t.Fatal("expected persisted task")
+	}
+	if stored.AgentName != "agent-1" {
+		t.Fatalf("expected agent-1, got %q", stored.AgentName)
+	}
+}
+
 func TestEngineImpl_StartTaskWithInput_InjectsCredentialToken(t *testing.T) {
 	repo := persmemory.NewTaskRepository()
 	bus := msgmemory.NewEventBus()
