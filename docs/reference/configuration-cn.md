@@ -93,6 +93,7 @@
 | `AGENTOS_LLM_MODEL` | LLM 模型名 | `gpt-4o` |
 | `AGENTOS_AGENT_SECRETS` | agent secret 映射 | 解析格式为 `agent=secret,agent2=secret2` |
 | `AGENTOS_AUTH_TOKENS` | bearer token 映射 | 解析格式为 `token=subject\|tenant\|role1;role2,...` |
+| `AGENTOS_POLICY_APPROVAL_REQUIRED` | 全局审批门禁工具模式 | 解析格式为 `tool,tool2,*pattern*`；会追加一条通配 agent 的 policy rule，并以 `approval required` 原因阻断命中工具 |
 
 ### HTTP API Server
 
@@ -175,6 +176,30 @@ token-a=user-a|tenant-a|admin;writer,token-b=user-b|tenant-b
 - `subject` 必填
 - `tenant` 与 `roles` 可选
 - 多个 role 用 `;` 分隔
+
+### `AGENTOS_POLICY_APPROVAL_REQUIRED`
+
+格式：
+
+```text
+shell,git.clone,http.post
+```
+
+含义：
+
+- 每个条目都是一个工具 glob 模式
+- 空条目会被忽略
+- bootstrap 会追加一条带 `approval_required` 模式的通配 agent policy rule
+- 命中的 action 会被 policy 以 `approval required` 原因阻断
+
+## Policy Rule 字段
+
+当你在代码中直接构造 `config.Config` 时，每个 `policy.rules` 条目支持：
+
+- `agent`：要匹配的 agent glob
+- `allow`：允许的工具模式
+- `deny`：拒绝的工具模式
+- `approval_required`：需要先停在治理审批门禁而不是立即执行的工具模式
 
 ## 实用配置画像
 

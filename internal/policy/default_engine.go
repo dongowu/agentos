@@ -53,8 +53,8 @@ func (e *DefaultEngine) Evaluate(_ context.Context, req PolicyRequest) (*PolicyD
 	// 1. Dangerous command blacklist
 	if reason, blocked := e.checkDangerousCommand(req.Command); blocked {
 		return &PolicyDecision{
-			Allowed: false,
-			Reason:  reason,
+			Allowed:  false,
+			Reason:   reason,
 			Autonomy: e.defaultAutonomy,
 		}, nil
 	}
@@ -63,8 +63,8 @@ func (e *DefaultEngine) Evaluate(_ context.Context, req PolicyRequest) (*PolicyD
 	if e.rateLimit > 0 {
 		if !e.allowRate(req.AgentName) {
 			return &PolicyDecision{
-				Allowed: false,
-				Reason:  fmt.Sprintf("rate limit exceeded: max %d actions/hour for agent %q", e.rateLimit, req.AgentName),
+				Allowed:  false,
+				Reason:   fmt.Sprintf("rate limit exceeded: max %d actions/hour for agent %q", e.rateLimit, req.AgentName),
 				Autonomy: e.defaultAutonomy,
 			}, nil
 		}
@@ -122,6 +122,16 @@ func (e *DefaultEngine) evaluateRules(req PolicyRequest) *PolicyDecision {
 				return &PolicyDecision{
 					Allowed:  false,
 					Reason:   fmt.Sprintf("tool %q denied by pattern %q for agent %q", req.ToolName, pattern, rule.Agent),
+					Autonomy: e.defaultAutonomy,
+				}
+			}
+		}
+
+		for _, pattern := range rule.Actions.ApprovalRequired {
+			if matched, _ := filepath.Match(pattern, req.ToolName); matched {
+				return &PolicyDecision{
+					Allowed:  false,
+					Reason:   ReasonApprovalRequired,
 					Autonomy: e.defaultAutonomy,
 				}
 			}

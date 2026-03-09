@@ -25,8 +25,9 @@ func TestDefaultEngine_DenyTakesPrecedence(t *testing.T) {
 			{
 				Agent: "worker-*",
 				Actions: Actions{
-					Allow: []string{"shell", "http"},
-					Deny:  []string{"shell"},
+					Allow:            []string{"shell", "http"},
+					Deny:             []string{"shell"},
+					ApprovalRequired: []string{"shell"},
 				},
 			},
 		},
@@ -40,6 +41,60 @@ func TestDefaultEngine_DenyTakesPrecedence(t *testing.T) {
 	}
 	if dec.Allowed {
 		t.Fatal("expected denied because deny takes precedence over allow")
+	}
+}
+
+func TestDefaultEngine_ApprovalRequiredBlocksMatchedTool(t *testing.T) {
+	engine := NewDefaultEngine(Config{
+		Rules: []Rule{
+			{
+				Agent: "worker-*",
+				Actions: Actions{
+					Allow:            []string{"shell", "http*"},
+					ApprovalRequired: []string{"shell"},
+				},
+			},
+		},
+	})
+	dec, err := engine.Evaluate(context.Background(), PolicyRequest{
+		AgentName: "worker-1",
+		ToolName:  "shell",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Allowed {
+		t.Fatal("expected approval-required tool to be blocked")
+	}
+	if dec.Reason != ReasonApprovalRequired {
+		t.Fatalf("expected reason %q, got %q", ReasonApprovalRequired, dec.Reason)
+	}
+}
+
+func TestDefaultEngine_ApprovalRequiredPrecedesAllow(t *testing.T) {
+	engine := NewDefaultEngine(Config{
+		Rules: []Rule{
+			{
+				Agent: "worker-*",
+				Actions: Actions{
+					Allow:            []string{"git.*"},
+					ApprovalRequired: []string{"git.clone"},
+				},
+			},
+		},
+	})
+	dec, err := engine.Evaluate(context.Background(), PolicyRequest{
+		AgentName: "worker-1",
+		ToolName:  "git.clone",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Allowed {
+		t.Fatal("expected approval-required rule to win over allow")
+	}
+	if dec.Reason != ReasonApprovalRequired {
+		t.Fatalf("expected reason %q, got %q", ReasonApprovalRequired, dec.Reason)
 	}
 }
 
