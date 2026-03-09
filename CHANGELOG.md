@@ -11,7 +11,7 @@ The format follows Keep a Changelog and the project uses semantic versioning for
 - Added `.github/ISSUE_TEMPLATE/config.yml` for cleaner issue routing.
 - Added English and Chinese open-source launch update documents.
 - Added English and Chinese launch messaging kit documents.
-- Added `docs/README.md`, `docs/README_CN.md`, `docs/plans/README.md`, and `docs/updates/README.md` to simplify documentation navigation.
+- Added `docs/README.md`, `docs/README_CN.md`, and documentation index pages for working docs navigation.
 
 ### Changed
 - Simplified `README.md` and `README_CN.md` documentation entry points.

@@ -14,10 +14,10 @@ These documents are **working documents**, not the primary onboarding path for n
 
 If you are new to the repository, start with:
 
-- [`../README.md`](../README.md)
-- [`../README_CN.md`](../README_CN.md)
-- [`../architecture/overview.md`](../architecture/overview.md)
-- [`../architecture/platform-vs-capability-boundary.md`](../architecture/platform-vs-capability-boundary.md)
+- [`../../README.md`](../../README.md)
+- [`../../README_CN.md`](../../README_CN.md)
+- [`../../architecture/overview.md`](../../architecture/overview.md)
+- [`../../architecture/platform-vs-capability-boundary.md`](../../architecture/platform-vs-capability-boundary.md)
 
 ## Key Plans In This Folder
 

@@ -67,8 +67,9 @@ These documents explain what belongs in the open-source core:
 
 These folders are useful for contributors, but they are not the recommended first stop for new readers:
 
-- [`plans/README.md`](plans/README.md) — implementation plans, design notes, and execution breakdowns
-- [`updates/README.md`](updates/README.md) — release notes, project updates, and launch materials
+- [Internal Docs Index](internal/README.md)
+- [`internal/plans/README.md`](internal/plans/README.md) — implementation plans, design notes, and execution breakdowns
+- [`internal/updates/README.md`](internal/updates/README.md) — release notes, project updates, and launch materials
 
 ## Suggested Reading By Audience
 
@@ -91,4 +92,4 @@ These folders are useful for contributors, but they are not the recommended firs
 - [Contributing Guide](../CONTRIBUTING.md)
 - [Support Guide](../SUPPORT.md)
 - [Security Policy](../SECURITY.md)
-- [`plans/README.md`](plans/README.md)
+- [Internal Docs Index](internal/README.md)

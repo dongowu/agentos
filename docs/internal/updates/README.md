@@ -10,7 +10,7 @@ Use this folder when you want to understand:
 - how a release was positioned
 - what public launch materials were prepared
 
-These documents complement the release history in [`../../CHANGELOG.md`](../../CHANGELOG.md).
+These documents complement the release history in [`../../../CHANGELOG.md`](../../../CHANGELOG.md).
 
 ## Key Updates In This Folder
 
