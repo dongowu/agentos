@@ -7,11 +7,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dongowu/agentos/internal/access"
+	"github.com/dongowu/agentos/internal/agent"
 	"github.com/dongowu/agentos/internal/gateway"
 	"github.com/dongowu/agentos/internal/messaging"
 	"github.com/dongowu/agentos/internal/persistence"
+	"github.com/dongowu/agentos/internal/worker"
 	"github.com/dongowu/agentos/pkg/events"
 )
 
@@ -22,6 +25,8 @@ type Server struct {
 	Audit   persistence.AuditLogStore
 	Bus     messaging.EventBus
 	Auth    access.AuthProvider
+	Agents  *agent.Manager
+	Workers worker.Registry
 	Gateway *gateway.Handler
 	srv     *http.Server
 }
@@ -44,8 +49,10 @@ func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/v1/audit", s.handleAudit)
+	mux.HandleFunc("/v1/agents", s.handleAgents)
 	mux.HandleFunc("/v1/tasks", s.handleTasks)
 	mux.HandleFunc("/v1/tasks/", s.handleTaskByID)
+	mux.HandleFunc("/v1/workers", s.handleWorkers)
 	if s.Gateway != nil {
 		mux.HandleFunc("/agent/run", s.withAuthentication(s.Gateway.ServeAgentRun))
 		mux.HandleFunc("/agent/status", s.withAuthentication(s.Gateway.ServeAgentStatus))
@@ -91,6 +98,99 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"records": records})
+}
+
+func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/v1/agents" {
+		http.NotFound(w, r)
+		return
+	}
+	ctx, _, ok := s.authenticateRequest(w, r)
+	if !ok {
+		return
+	}
+	r = r.WithContext(ctx)
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	response := struct {
+		Agents []agentSummary `json:"agents"`
+	}{Agents: []agentSummary{}}
+	if s.Agents != nil {
+		for _, name := range s.Agents.List() {
+			runtime := s.Agents.Get(name)
+			if runtime == nil || runtime.Config == nil {
+				continue
+			}
+			response.Agents = append(response.Agents, agentSummary{
+				Name:        runtime.Config.Name,
+				Description: runtime.Config.Description,
+				Model:       runtime.Config.Model,
+				Tools:       append([]string(nil), runtime.Config.Tools...),
+				Workflow:    append([]string(nil), runtime.Config.Workflow...),
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleWorkers(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/v1/workers" {
+		http.NotFound(w, r)
+		return
+	}
+	ctx, _, ok := s.authenticateRequest(w, r)
+	if !ok {
+		return
+	}
+	r = r.WithContext(ctx)
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	response := struct {
+		Workers []workerSummary `json:"workers"`
+	}{Workers: []workerSummary{}}
+	if s.Workers != nil {
+		workers, err := s.Workers.List(r.Context())
+		if err != nil {
+			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			return
+		}
+		for _, info := range workers {
+			response.Workers = append(response.Workers, workerSummary{
+				ID:            info.ID,
+				Addr:          info.Addr,
+				Capabilities:  append([]string(nil), info.Capabilities...),
+				Status:        string(info.Status),
+				LastHeartbeat: info.LastHeartbeat,
+				ActiveTasks:   info.ActiveTasks,
+				MaxTasks:      info.MaxTasks,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+type agentSummary struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Model       string   `json:"model,omitempty"`
+	Tools       []string `json:"tools,omitempty"`
+	Workflow    []string `json:"workflow,omitempty"`
+}
+
+type workerSummary struct {
+	ID            string    `json:"id"`
+	Addr          string    `json:"addr,omitempty"`
+	Capabilities  []string  `json:"capabilities,omitempty"`
+	Status        string    `json:"status,omitempty"`
+	LastHeartbeat time.Time `json:"last_heartbeat,omitempty"`
+	ActiveTasks   int       `json:"active_tasks"`
+	MaxTasks      int       `json:"max_tasks"`
 }
 
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
