@@ -92,6 +92,7 @@ json_field() {
 echo "[acceptance] building Go binaries"
 GOCACHE="$GO_CACHE_DIR" go build -o "$BIN_DIR/controller" ./cmd/controller
 GOCACHE="$GO_CACHE_DIR" go build -o "$BIN_DIR/apiserver" ./cmd/apiserver
+GOCACHE="$GO_CACHE_DIR" go build -o "$BIN_DIR/acceptancejson" ./cmd/acceptancejson
 
 echo "[acceptance] building Rust worker"
 (
@@ -172,12 +173,12 @@ fi
 
 echo "[acceptance] verifying task audit API"
 TASK_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$TASK_ID/audit")
-ACTION_COUNT=$(printf '%s' "$TASK_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; print(len(records))')
+ACTION_COUNT=$(printf '%s' "$TASK_AUDIT" | "$BIN_DIR/acceptancejson" task-audit-count)
 if [[ "$ACTION_COUNT" -lt "$EXPECTED_ACTIONS" ]]; then
   echo "expected at least $EXPECTED_ACTIONS audit records, got $ACTION_COUNT: $TASK_AUDIT"
   exit 1
 fi
-ACTION_ID=$(printf '%s' "$TASK_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; assert records, "no audit records returned"; print(records[-1]["action_id"])')
+ACTION_ID=$(printf '%s' "$TASK_AUDIT" | "$BIN_DIR/acceptancejson" task-audit-last-action-id)
 if [[ -z "$ACTION_ID" ]]; then
   echo "failed to parse action_id from task audit response: $TASK_AUDIT"
   exit 1
@@ -185,7 +186,7 @@ fi
 
 echo "[acceptance] verifying action audit API for action_id=$ACTION_ID"
 ACTION_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$TASK_ID/actions/$ACTION_ID/audit")
-ACTION_EXIT=$(printf '%s' "$ACTION_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get("exit_code", ""))')
+ACTION_EXIT=$(printf '%s' "$ACTION_AUDIT" | "$BIN_DIR/acceptancejson" action-audit-exit-code)
 if [[ "$ACTION_EXIT" != "0" ]]; then
   echo "unexpected action audit exit code: $ACTION_AUDIT"
   exit 1
@@ -193,7 +194,7 @@ fi
 
 echo "[acceptance] verifying global audit API"
 GLOBAL_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/audit?failed=false&limit=20")
-GLOBAL_MATCHES=$(printf '%s' "$GLOBAL_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; task_id=sys.argv[1]; print(sum(1 for r in records if r.get("task_id") == task_id and r.get("tenant_id") == "tenant-acceptance"))' "$TASK_ID")
+GLOBAL_MATCHES=$(printf '%s' "$GLOBAL_AUDIT" | "$BIN_DIR/acceptancejson" global-audit-match-count "$TASK_ID" "tenant-acceptance")
 if [[ "$GLOBAL_MATCHES" -lt 1 ]]; then
   echo "expected global audit feed to include accepted tenant record for task $TASK_ID: $GLOBAL_AUDIT"
   exit 1
@@ -249,7 +250,7 @@ if [[ "$BRIDGE_FILE_CONTENT" != "$BRIDGE_CONTENT" ]]; then
 fi
 
 BRIDGE_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$BRIDGE_TASK_ID/audit")
-BRIDGE_LAST_WORKER=$(printf '%s' "$BRIDGE_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; assert records, "no bridge audit records returned"; print(records[-1].get("worker_id", ""))')
+BRIDGE_LAST_WORKER=$(printf '%s' "$BRIDGE_AUDIT" | "$BIN_DIR/acceptancejson" task-audit-last-worker-id)
 if [[ "$BRIDGE_LAST_WORKER" != "control-plane" ]]; then
   echo "expected bridge audit worker_id control-plane, got $BRIDGE_LAST_WORKER: $BRIDGE_AUDIT"
   exit 1

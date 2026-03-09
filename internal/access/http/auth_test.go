@@ -292,3 +292,30 @@ func TestServer_GlobalAudit_UsesAuthenticatedTenantScope(t *testing.T) {
 		t.Fatalf("expected tenant-auth, got %q", resp.Records[0].TenantID)
 	}
 }
+
+func TestServer_ListAgents_RequiresBearerTokenWhenAuthConfigured(t *testing.T) {
+	srv := &Server{Auth: &stubAuthProvider{principal: &access.Principal{Subject: "user-1", TenantID: "tenant-auth"}}}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/agents", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", rec.Code)
+	}
+}
+
+func TestServer_ListWorkers_RequiresValidBearerTokenWhenAuthConfigured(t *testing.T) {
+	srv := &Server{Auth: &stubAuthProvider{err: errors.New("bad token")}}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/workers", nil)
+	req.Header.Set("Authorization", "Bearer invalid")
+	rec := httptest.NewRecorder()
+
+	srv.handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", rec.Code)
+	}
+}

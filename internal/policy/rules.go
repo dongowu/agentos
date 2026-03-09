@@ -11,15 +11,16 @@ type Rule struct {
 
 // Actions holds allow/deny glob patterns. Deny takes precedence over allow.
 type Actions struct {
-	Allow []string
-	Deny  []string
+	Allow            []string
+	Deny             []string
+	ApprovalRequired []string
 }
 
 // Config holds policy engine configuration loaded at startup.
 type Config struct {
-	Rules          []Rule
+	Rules           []Rule
 	DefaultAutonomy AutonomyLevel
-	RateLimit      RateLimitConfig
+	RateLimit       RateLimitConfig
 }
 
 // RateLimitConfig controls per-agent rate limiting.
