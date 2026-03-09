@@ -10,6 +10,7 @@
 - [中文 README](../README_CN.md)
 - [快速上手](guides/getting-started-cn.md)
 - [核心能力参考](reference/core-capabilities-cn.md)
+- [API 能力面参考](reference/api-surfaces-cn.md)
 - [架构概览](architecture/overview.md)
 - [变更记录](../CHANGELOG.md)
 - [贡献指南](../CONTRIBUTING.md)
@@ -23,9 +24,10 @@
 1. [项目 README](../README.md)
 2. [快速上手](guides/getting-started-cn.md)
 3. [核心能力参考](reference/core-capabilities-cn.md)
-4. [架构概览](architecture/overview.md)
-5. [多进程验收说明](architecture/multiprocess-acceptance.md)
-6. [平台层与能力层边界](architecture/platform-vs-capability-boundary.md)
+4. [API 能力面参考](reference/api-surfaces-cn.md)
+5. [架构概览](architecture/overview.md)
+6. [多进程验收说明](architecture/multiprocess-acceptance.md)
+7. [平台层与能力层边界](architecture/platform-vs-capability-boundary.md)
 
 ## 指南
 
@@ -34,6 +36,7 @@
 ## 参考
 
 - [核心能力参考](reference/core-capabilities-cn.md)
+- [API 能力面参考](reference/api-surfaces-cn.md)
 
 ## 当前架构文档
 
@@ -78,11 +81,13 @@
 - [项目 README](../README.md)
 - [快速上手](guides/getting-started-cn.md)
 - [核心能力参考](reference/core-capabilities-cn.md)
+- [API 能力面参考](reference/api-surfaces-cn.md)
 - [架构概览](architecture/overview.md)
 
 ### 面向平台 / 基础设施团队
 
 - [架构概览](architecture/overview.md)
+- [API 能力面参考](reference/api-surfaces-cn.md)
 - [多进程验收说明](architecture/multiprocess-acceptance.md)
 - [策略引擎](architecture/policy-engine.md)
 - [许可证决策](strategy/licensing-decision.md)

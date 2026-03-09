@@ -10,6 +10,7 @@ If you are new to the repository, read these first:
 - [Chinese README](../README_CN.md)
 - [Getting Started Guide](guides/getting-started.md)
 - [Core Capabilities Reference](reference/core-capabilities.md)
+- [API Surfaces Reference](reference/api-surfaces.md)
 - [Architecture Overview](architecture/overview.md)
 - [Changelog](../CHANGELOG.md)
 - [Contributing Guide](../CONTRIBUTING.md)
@@ -23,9 +24,10 @@ Use this order if you want to understand the project quickly:
 1. [Project README](../README.md)
 2. [Getting Started Guide](guides/getting-started.md)
 3. [Core Capabilities Reference](reference/core-capabilities.md)
-4. [Architecture Overview](architecture/overview.md)
-5. [Multiprocess Acceptance](architecture/multiprocess-acceptance.md)
-6. [Platform vs Capability Boundary](architecture/platform-vs-capability-boundary.md)
+4. [API Surfaces Reference](reference/api-surfaces.md)
+5. [Architecture Overview](architecture/overview.md)
+6. [Multiprocess Acceptance](architecture/multiprocess-acceptance.md)
+7. [Platform vs Capability Boundary](architecture/platform-vs-capability-boundary.md)
 
 ## Guides
 
@@ -34,6 +36,7 @@ Use this order if you want to understand the project quickly:
 ## Reference
 
 - [Core Capabilities Reference](reference/core-capabilities.md)
+- [API Surfaces Reference](reference/api-surfaces.md)
 
 ## Current Architecture
 
@@ -78,11 +81,13 @@ These folders are useful for contributors, but they are not the recommended firs
 - [Project README](../README.md)
 - [Getting Started Guide](guides/getting-started.md)
 - [Core Capabilities Reference](reference/core-capabilities.md)
+- [API Surfaces Reference](reference/api-surfaces.md)
 - [Architecture Overview](architecture/overview.md)
 
 ### For platform / infra teams
 
 - [Architecture Overview](architecture/overview.md)
+- [API Surfaces Reference](reference/api-surfaces.md)
 - [Multiprocess Acceptance](architecture/multiprocess-acceptance.md)
 - [Policy Engine](architecture/policy-engine.md)
 - [Licensing Decision](strategy/licensing-decision.md)

@@ -116,6 +116,7 @@ Clients (CLI / API / SDK)
 
 - [快速上手](docs/guides/getting-started-cn.md)
 - [核心能力参考](docs/reference/core-capabilities-cn.md)
+- [API 能力面参考](docs/reference/api-surfaces-cn.md)
 - [架构概览](docs/architecture/overview.md)
 - [多进程验收说明](docs/architecture/multiprocess-acceptance.md)
 - [文档导航](docs/README_CN.md)

@@ -116,6 +116,7 @@ If you want details beyond the homepage, start here:
 
 - [Getting Started Guide](docs/guides/getting-started.md)
 - [Core Capabilities Reference](docs/reference/core-capabilities.md)
+- [API Surfaces Reference](docs/reference/api-surfaces.md)
 - [Architecture Overview](docs/architecture/overview.md)
 - [Multiprocess Acceptance](docs/architecture/multiprocess-acceptance.md)
 - [Documentation Index](docs/README.md)
