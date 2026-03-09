@@ -360,7 +360,7 @@ For the public repository, the focus is the **Community** core: the self-hosted 
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and contribution guidelines, [SECURITY.md](SECURITY.md) for vulnerability reporting, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and contribution guidelines, [SUPPORT.md](SUPPORT.md) for community support boundaries, [SECURITY.md](SECURITY.md) for vulnerability reporting, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations.
 
 ## License
 

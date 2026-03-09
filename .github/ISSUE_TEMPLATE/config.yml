@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/dongowu/agentos/blob/main/README.md
+    about: Start here for setup, architecture, and community-core scope.
+  - name: Support Guide
+    url: https://github.com/dongowu/agentos/blob/main/SUPPORT.md
+    about: Read the support boundary and issue routing guidance before opening a ticket.
+  - name: Security Policy
+    url: https://github.com/dongowu/agentos/blob/main/SECURITY.md
+    about: Report vulnerabilities through the responsible disclosure path, not public issues.
