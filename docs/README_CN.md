@@ -33,10 +33,12 @@
 
 ## 指南
 
+- [指南索引](guides/README_CN.md)
 - [快速上手](guides/getting-started-cn.md)
 
 ## 参考
 
+- [参考文档索引](reference/README_CN.md)
 - [核心能力参考](reference/core-capabilities-cn.md)
 - [API 能力面参考](reference/api-surfaces-cn.md)
 - [配置参考](reference/configuration-cn.md)
@@ -46,6 +48,7 @@
 
 以下文档更直接描述当前开源平台的能力面：
 
+- [架构文档索引](architecture/README_CN.md)
 - [架构概览](architecture/overview.md)
 - [Monorepo 结构](architecture/monorepo-structure.md)
 - [平台层与能力层边界](architecture/platform-vs-capability-boundary.md)
@@ -67,6 +70,7 @@
 
 以下文档用于说明当前开源核心的边界：
 
+- [策略文档索引](strategy/README_CN.md)
 - [许可证决策](strategy/licensing-decision.md)
 - [平台层与能力层边界](architecture/platform-vs-capability-boundary.md)
 

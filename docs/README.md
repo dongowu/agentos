@@ -33,10 +33,12 @@ Use this order if you want to understand the project quickly:
 
 ## Guides
 
+- [Guides Index](guides/README.md)
 - [Getting Started Guide](guides/getting-started.md)
 
 ## Reference
 
+- [Reference Docs Index](reference/README.md)
 - [Core Capabilities Reference](reference/core-capabilities.md)
 - [API Surfaces Reference](reference/api-surfaces.md)
 - [Configuration Reference](reference/configuration.md)
@@ -46,6 +48,7 @@ Use this order if you want to understand the project quickly:
 
 These documents describe the current open-source platform shape more directly:
 
+- [Architecture Docs Index](architecture/README.md)
 - [Architecture Overview](architecture/overview.md)
 - [Monorepo Structure](architecture/monorepo-structure.md)
 - [Platform vs Capability Boundary](architecture/platform-vs-capability-boundary.md)
@@ -67,6 +70,7 @@ These documents are useful context, but they are not the recommended first stop 
 
 These documents explain what belongs in the open-source core:
 
+- [Strategy Docs Index](strategy/README.md)
 - [Licensing Decision](strategy/licensing-decision.md)
 - [Platform vs Capability Boundary](architecture/platform-vs-capability-boundary.md)
 
