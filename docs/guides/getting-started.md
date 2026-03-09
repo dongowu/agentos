@@ -78,6 +78,7 @@ cd runtime && cargo test --workspace
 ## Read Next
 
 - [Core Capabilities Reference](../reference/core-capabilities.md)
+- [Configuration Reference](../reference/configuration.md)
 - [Architecture Overview](../architecture/overview.md)
 - [Multiprocess Acceptance](../architecture/multiprocess-acceptance.md)
 - [Documentation Index](../README.md)

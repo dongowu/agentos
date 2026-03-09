@@ -78,6 +78,7 @@ cd runtime && cargo test --workspace
 ## 下一步阅读
 
 - [核心能力参考](../reference/core-capabilities-cn.md)
+- [配置参考](../reference/configuration-cn.md)
 - [架构概览](../architecture/overview.md)
 - [多进程验收说明](../architecture/multiprocess-acceptance.md)
 - [文档导航](../README_CN.md)

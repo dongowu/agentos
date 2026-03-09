@@ -377,4 +377,5 @@ Typical status codes:
 
 - [Core Capabilities Reference](core-capabilities.md)
 - [Getting Started Guide](../guides/getting-started.md)
+- [Configuration Reference](configuration.md)
 - [Architecture Overview](../architecture/overview.md)

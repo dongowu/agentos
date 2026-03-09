@@ -11,6 +11,7 @@
 - [快速上手](guides/getting-started-cn.md)
 - [核心能力参考](reference/core-capabilities-cn.md)
 - [API 能力面参考](reference/api-surfaces-cn.md)
+- [配置参考](reference/configuration-cn.md)
 - [架构概览](architecture/overview.md)
 - [变更记录](../CHANGELOG.md)
 - [贡献指南](../CONTRIBUTING.md)
@@ -37,6 +38,7 @@
 
 - [核心能力参考](reference/core-capabilities-cn.md)
 - [API 能力面参考](reference/api-surfaces-cn.md)
+- [配置参考](reference/configuration-cn.md)
 
 ## 当前架构文档
 
@@ -82,12 +84,14 @@
 - [快速上手](guides/getting-started-cn.md)
 - [核心能力参考](reference/core-capabilities-cn.md)
 - [API 能力面参考](reference/api-surfaces-cn.md)
+- [配置参考](reference/configuration-cn.md)
 - [架构概览](architecture/overview.md)
 
 ### 面向平台 / 基础设施团队
 
 - [架构概览](architecture/overview.md)
 - [API 能力面参考](reference/api-surfaces-cn.md)
+- [配置参考](reference/configuration-cn.md)
 - [多进程验收说明](architecture/multiprocess-acceptance.md)
 - [策略引擎](architecture/policy-engine.md)
 - [许可证决策](strategy/licensing-decision.md)

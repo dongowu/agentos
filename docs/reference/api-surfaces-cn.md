@@ -375,4 +375,5 @@ Connection: keep-alive
 
 - [核心能力参考](core-capabilities-cn.md)
 - [快速上手](../guides/getting-started-cn.md)
+- [配置参考](configuration-cn.md)
 - [架构概览](../architecture/overview.md)
