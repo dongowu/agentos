@@ -32,7 +32,9 @@
 
 ---
 
-## 总体架构（最终形态）
+## 总体架构（设计目标态）
+
+> 说明：本节描述的是 v1 设计目标态，不等同于当前公开仓库已经全部实现的能力面。
 
 ```
                 +-----------------------+
@@ -97,12 +99,14 @@
 
 | # | 系统 | 职责 |
 |---|------|------|
-| 1 | Access System | API、CLI、UI、SDK、Auth |
+| 1 | Access System | API、CLI、Gateway、Auth，以及后续可扩展入口 |
 | 2 | Planner System (Agent Brain) | 自然语言 → Plan → Actions |
 | 3 | Task Engine | 任务生命周期、状态机、重试、并发、队列 |
 | 4 | Skill System | Skill Registry、Skill Resolver、能力插件 |
-| 5 | Policy Engine | 权限、Guardrail、OPA/Cedar/Rego |
+| 5 | Policy Engine | 权限、Guardrail、规则拦截与执行前校验 |
 | 6 | Runtime System | Rust Worker、Sandbox、隔离、Telemetry |
+
+> 说明：表中涉及 UI、SDK、扩展策略后端等内容，部分属于设计延展，并未全部纳入当前 community core。
 
 ---
 
@@ -115,8 +119,8 @@
 - HTTP API
 - CLI (osctl)
 - Gateway routes
-- UI（未来）
-- SDK（未来）
+- UI（设计延展）
+- SDK（设计延展）
 
 ### 接口
 
@@ -180,7 +184,7 @@ Plan:
 ### 实现位置
 
 - `internal/orchestration/` - Planner 接口与适配器
-- `internal/planner/` - 未来可独立为 Agent Brain 包
+- `internal/planner/` - 后续可进一步独立为 Agent Brain 包
 
 ---
 
@@ -269,7 +273,9 @@ polymarket.trade
 Action → Skill Resolver → Skill → ExecutionProfile
 ```
 
-### 未来：AgentOS Hub（Skill Marketplace）
+### 设计延展：AgentOS Hub（Skill Marketplace）
+
+> 该部分属于扩展生态设想，不是当前公开仓库已承诺交付的核心范围。
 
 - 开发者发布 skills、agents、workflows
 - 抽成模式
@@ -339,7 +345,9 @@ Rust Worker 不理解 LLM，只执行 Action。
 Policy allow → Runtime Broker → 选择 Worker → 下发 Action
 ```
 
-### 未来能力
+### 设计延展能力
+
+> 下列能力用于说明潜在扩展方向，不代表当前开源仓库已实现或已排期。
 
 - 多 Worker 负载均衡
 - 资源预留与配额
@@ -396,8 +404,8 @@ API → task.created → controller → task.planned → worker → action.finis
 | plans | 计划 |
 | actions | 动作 |
 | audit_logs | 审计日志 |
-| skills | Skill 定义（未来） |
-| policies | 策略（未来） |
+| skills | Skill 定义（设计延展） |
+| policies | 策略（设计延展） |
 
 ### 实现位置
 
@@ -431,8 +439,8 @@ telemetry
 ### 隔离方式
 
 - Docker（MVP）
-- gVisor（未来）
-- Firecracker（未来）
+- gVisor（设计探索）
+- Firecracker（设计探索）
 
 ### 协议
 
@@ -455,8 +463,8 @@ telemetry
 | Provider | 状态 |
 |----------|------|
 | Docker | MVP |
-| gVisor | 未来 |
-| Firecracker | 未来 |
+| gVisor | 设计探索 |
+| Firecracker | 设计探索 |
 
 ### 接口
 
@@ -478,17 +486,21 @@ trait IsolationProvider {
 - stdout
 - stderr
 - resource usage
-- screenshots（未来）
+- screenshots（设计延展）
 - logs
 
-### UI 能力（未来）
+### UI 能力（设计延展）
+
+> 当前公开仓库已经提供 API 级 telemetry / audit / replay 能力，但并未把完整控制台 UI 作为 community core 的交付目标。
 
 - Agent execution timeline
 - step1 search repo → step2 create issue → step3 done
 
 ---
 
-## 十二、Agent Memory（可选，未来）
+## 十二、Agent Memory（设计延展）
+
+> 当前仓库已经具备 memory provider 与 planning / result 路径集成；本节保留的是更长周期的设计演进视角。
 
 **职责**: 长期记忆、知识检索。
 
@@ -506,7 +518,9 @@ MemoryProvider
 
 ---
 
-## 十三、Multi-Agent（未来）
+## 十三、Multi-Agent（设计延展）
+
+> Multi-agent 编排属于后续能力层扩展，不属于当前 community core 的承诺边界。
 
 **职责**: Agent 协作。
 
@@ -544,23 +558,27 @@ osctl submit "echo hello"
 
 ---
 
-## 产品形态（未来）
+## 产品形态（边界外延展）
+
+> 本节用于说明开源核心之外可能出现的产品包装，不代表当前仓库范围。
 
 | 形态 | 类比 |
 |------|------|
-| 开源 Runtime | Kubernetes |
-| SaaS Agent Platform | Zapier + AI |
+| 开源 Runtime | Community Core |
+| Hosted Agent Platform | Managed Offering |
 | 企业 Agent 平台 | Private Agent Execution Platform |
 
 ---
 
-## 商业化方向
+## 商业化边界说明
+
+> 当前公开仓库重点是开源执行底座；商业化能力仅作为边界说明，不应被理解为当前仓库交付清单。
 
 | 形态 | 说明 |
 |------|------|
-| SaaS | Agent Cloud，按 execution minutes / workers / storage 收费 |
-| 企业版 | on-prem agent platform，客户：银行、云厂、AI 公司 |
-| Skill Marketplace | AgentOS Hub，抽成 20% |
+| Hosted | 托管执行与控制面服务 |
+| 企业增强 | 组织治理、长周期审计、权限与支持流程 |
+| Ecosystem | 可能存在的技能 / agent 分发与生态层 |
 
 ---
 

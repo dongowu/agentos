@@ -1,8 +1,10 @@
 # ClawOS v1 架构（一步到位）
 
-> **产品**: ClawOS  
-> **定位**: Agent Runtime + Tool Marketplace + Execution Sandbox  
-> **一句话**: The Operating System for AI Agents
+> **状态说明**：这是一份历史性的概念 / 对照文档，用来表达一个更偏产品化的目标态设想；它**不是**当前 AgentOS 开源仓库的正式 roadmap，也不是公开仓库已经实现的能力清单。
+>
+> **阅读建议**：如果你想了解当前仓库的真实能力，请优先阅读 [Architecture Overview](overview.md)、[Getting Started](../guides/getting-started.md) 与 [Core Capabilities Reference](../reference/core-capabilities.md)。
+>
+> **概念定位**：ClawOS = Agent Runtime + Tool Marketplace + Execution Sandbox 的产品化设想。
 
 ## 能力覆盖
 
@@ -27,11 +29,13 @@ Memory
 | Multi Agent | ❌ | ❌ | ❌ | ✅ |
 | Sandbox | ⚠️ | ⚠️ | ⚠️ | ✅ |
 
-**本质区别**: 他们是工具，ClawOS 是操作系统。
+**本质区别（概念层）**: 这里讨论的是一个更完整的 agent product shell 设想，而不是当前 AgentOS 仓库已经公开交付的开源执行底座。
 
 ---
 
 ## 总体架构
+
+> 说明：以下架构图是概念目标态，包含 UI、Marketplace、WASM 等不属于当前 AgentOS community core 的内容。
 
 ```
                 ┌──────────────────────┐
@@ -69,6 +73,8 @@ Memory
 ---
 
 ## Monorepo 结构（一步到位）
+
+> 说明：以下目录结构是概念化拆分方案，并非当前仓库目录现状。
 
 ```
 clawos/
@@ -223,6 +229,8 @@ Result
 
 ## Sandbox 类型
 
+> 说明：其中 `wasm` 等项属于设想能力，不代表当前仓库已有对应 runtime 实现。
+
 | 类型 | 说明 |
 |------|------|
 | browser | Playwright，open/click/input/scrape |
@@ -270,6 +278,8 @@ claw agent publish
 
 ## Claw Studio（Web UI）
 
+> 该部分是产品层设想，不属于当前公开仓库交付范围。
+
 - Agent Builder
 - Workflow Builder
 - Logs / Debug
@@ -305,9 +315,11 @@ cli
 
 ---
 
-## 商业模式
+## 概念化商业模式
 
-**Agent Marketplace**：别人卖 agent，ClawOS 抽成。
+> 本节是概念讨论，不代表当前开源项目的正式商业承诺。
+
+**Agent Marketplace**：作为概念示例，别人卖 agent，平台可抽成。
 
 ---
 
