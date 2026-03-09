@@ -13,8 +13,7 @@ WORKER_ADDR=${AGENTOS_ACCEPTANCE_WORKER_ADDR:-127.0.0.1:15051}
 TASK_PROMPT=${AGENTOS_ACCEPTANCE_PROMPT:-echo acceptance-one then echo acceptance-two}
 EXPECTED_ACTIONS=${AGENTOS_ACCEPTANCE_EXPECTED_ACTIONS:-2}
 BRIDGE_CONTENT=${AGENTOS_ACCEPTANCE_BRIDGE_CONTENT:-bridge-acceptance}
-BRIDGE_FILE=${AGENTOS_ACCEPTANCE_BRIDGE_FILE:-$TMP_DIR/bridge-acceptance.txt}
-BRIDGE_PROMPT=${AGENTOS_ACCEPTANCE_BRIDGE_PROMPT:-write $BRIDGE_CONTENT to $BRIDGE_FILE then read $BRIDGE_FILE}
+BRIDGE_FILE=${AGENTOS_ACCEPTANCE_BRIDGE_FILE:-$ROOT_DIR/.tmp/agentos-acceptance/bridge-acceptance.txt}
 AUTH_TOKEN=${AGENTOS_ACCEPTANCE_AUTH_TOKEN:-acceptance-token}
 AUTH_PRINCIPAL=${AGENTOS_ACCEPTANCE_AUTH_PRINCIPAL:-acceptance-user|tenant-acceptance}
 GO_CACHE_DIR=${GOCACHE:-$TMP_DIR/go-build}
@@ -100,6 +99,8 @@ echo "[acceptance] building Rust worker"
   cargo build -p agentos-worker >/dev/null
 )
 WORKER_BIN="$ROOT_DIR/runtime/target/debug/agentos-worker"
+BRIDGE_FILE_NATIVE=$("$BIN_DIR/acceptancejson" native-path "$BRIDGE_FILE")
+BRIDGE_PROMPT=${AGENTOS_ACCEPTANCE_BRIDGE_PROMPT:-write $BRIDGE_CONTENT to $BRIDGE_FILE_NATIVE then read $BRIDGE_FILE_NATIVE}
 
 echo "[acceptance] starting controller on $CTRL_ADDR"
 AGENTOS_MODE=dev \
@@ -142,7 +143,7 @@ echo "[acceptance] submitting task through apiserver"
 SUBMIT_RESPONSE=$(curl -fsS -X POST "http://$API_ADDR/v1/tasks" \
   -H "Authorization: Bearer $AUTH_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d "{\"prompt\":\"$TASK_PROMPT\"}")
+  -d "$("$BIN_DIR/acceptancejson" create-task-request-body "$TASK_PROMPT")")
 TASK_ID=$(printf '%s' "$SUBMIT_RESPONSE" | json_field task_id)
 INITIAL_STATE=$(printf '%s' "$SUBMIT_RESPONSE" | json_field state)
 if [[ -z "$TASK_ID" ]]; then
@@ -211,7 +212,7 @@ echo "[acceptance] submitting bridge task through apiserver"
 BRIDGE_RESPONSE=$(curl -fsS -X POST "http://$API_ADDR/v1/tasks" \
   -H "Authorization: Bearer $AUTH_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d "{\"prompt\":\"$BRIDGE_PROMPT\"}")
+  -d "$("$BIN_DIR/acceptancejson" create-task-request-body "$BRIDGE_PROMPT")")
 BRIDGE_TASK_ID=$(printf '%s' "$BRIDGE_RESPONSE" | json_field task_id)
 BRIDGE_INITIAL_STATE=$(printf '%s' "$BRIDGE_RESPONSE" | json_field state)
 if [[ -z "$BRIDGE_TASK_ID" ]]; then
@@ -239,11 +240,11 @@ if [[ "$BRIDGE_FINAL_STATE" != "succeeded" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$BRIDGE_FILE" ]]; then
-  echo "bridge file was not created: $BRIDGE_FILE"
-  exit 1
+if [[ ! -f "$BRIDGE_FILE_NATIVE" ]]; then
+	 echo "bridge file was not created: $BRIDGE_FILE_NATIVE"
+	 exit 1
 fi
-BRIDGE_FILE_CONTENT=$(cat "$BRIDGE_FILE")
+BRIDGE_FILE_CONTENT=$(cat "$BRIDGE_FILE_NATIVE")
 if [[ "$BRIDGE_FILE_CONTENT" != "$BRIDGE_CONTENT" ]]; then
   echo "unexpected bridge file content: $BRIDGE_FILE_CONTENT"
   exit 1

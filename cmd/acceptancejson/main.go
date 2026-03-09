@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 )
 
 type auditEnvelope struct {
@@ -14,6 +17,10 @@ type auditEnvelope struct {
 
 type actionAuditRecord struct {
 	ExitCode int `json:"exit_code"`
+}
+
+type createTaskRequest struct {
+	Prompt string `json:"prompt"`
 }
 
 func main() {
@@ -32,6 +39,26 @@ func run(args []string, stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 	switch args[0] {
+	case "create-task-request-body":
+		if len(args) != 2 {
+			return errors.New("usage: acceptancejson create-task-request-body <prompt>")
+		}
+		body, err := createTaskRequestBody(args[1])
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(stdout, body)
+		return err
+	case "native-path":
+		if len(args) != 2 {
+			return errors.New("usage: acceptancejson native-path <path>")
+		}
+		path, err := nativePath(args[1])
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(stdout, path)
+		return err
 	case "task-audit-count":
 		count, err := taskAuditCount(input)
 		if err != nil {
@@ -146,4 +173,45 @@ func decodeAuditRecords(input []byte) ([]map[string]any, error) {
 		return []map[string]any{}, nil
 	}
 	return envelope.Records, nil
+}
+
+func nativePath(path string) (string, error) {
+	cleaned := strings.TrimSpace(path)
+	if cleaned == "" {
+		return "", errors.New("path required")
+	}
+	if runtime.GOOS != "windows" {
+		return filepath.Clean(cleaned), nil
+	}
+	if filepath.IsAbs(cleaned) {
+		return filepath.Clean(cleaned), nil
+	}
+	if len(cleaned) >= 3 && cleaned[0] == '/' && cleaned[2] == '/' {
+		drive := cleaned[1]
+		if (drive >= 'a' && drive <= 'z') || (drive >= 'A' && drive <= 'Z') {
+			return filepath.Clean(fmt.Sprintf("%c:%s", drive, cleaned[2:])), nil
+		}
+	}
+	if cleaned == "/tmp" || strings.HasPrefix(cleaned, "/tmp/") {
+		rel := strings.TrimPrefix(cleaned, "/tmp")
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" {
+			return filepath.Clean(os.TempDir()), nil
+		}
+		parts := strings.Split(rel, "/")
+		return filepath.Clean(filepath.Join(append([]string{os.TempDir()}, parts...)...)), nil
+	}
+	abs, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(abs), nil
+}
+
+func createTaskRequestBody(prompt string) (string, error) {
+	data, err := json.Marshal(createTaskRequest{Prompt: prompt})
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }

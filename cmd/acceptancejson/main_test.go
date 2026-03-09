@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestTaskAuditCount(t *testing.T) {
 	count, err := taskAuditCount([]byte(`{"records":[{"action_id":"prompt-1"},{"action_id":"prompt-2"}]}`))
@@ -49,5 +52,41 @@ func TestTaskAuditLastWorkerID(t *testing.T) {
 	}
 	if workerID != "control-plane" {
 		t.Fatalf("expected worker id control-plane, got %q", workerID)
+	}
+}
+
+func TestNativePath(t *testing.T) {
+	t.Run("windows tmp path", func(t *testing.T) {
+		if runtime.GOOS != "windows" {
+			t.Skip("windows-only path normalization")
+		}
+		got, err := nativePath(`/tmp/agentos-acceptance/bridge.txt`)
+		if err != nil {
+			t.Fatalf("nativePath returned error: %v", err)
+		}
+		if got == `/tmp/agentos-acceptance/bridge.txt` {
+			t.Fatalf("expected native Windows path, got unchanged %q", got)
+		}
+	})
+
+	t.Run("absolute path preserved", func(t *testing.T) {
+		input := t.TempDir()
+		got, err := nativePath(input)
+		if err != nil {
+			t.Fatalf("nativePath returned error: %v", err)
+		}
+		if got != input {
+			t.Fatalf("expected %q, got %q", input, got)
+		}
+	})
+}
+
+func TestCreateTaskRequestBody(t *testing.T) {
+	body, err := createTaskRequestBody(`write hello to C:\temp\bridge.txt then read C:\temp\bridge.txt`)
+	if err != nil {
+		t.Fatalf("createTaskRequestBody returned error: %v", err)
+	}
+	if body != `{"prompt":"write hello to C:\\temp\\bridge.txt then read C:\\temp\\bridge.txt"}` {
+		t.Fatalf("unexpected body: %s", body)
 	}
 }
