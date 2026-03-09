@@ -374,6 +374,7 @@ Connection: keep-alive
 ## 下一步阅读
 
 - [核心能力参考](core-capabilities-cn.md)
+- [运行时与沙箱参考](runtime-and-sandbox-cn.md)
 - [快速上手](../guides/getting-started-cn.md)
 - [配置参考](configuration-cn.md)
 - [架构概览](../architecture/overview.md)

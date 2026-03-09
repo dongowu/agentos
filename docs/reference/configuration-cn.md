@@ -239,4 +239,5 @@ export AGENTOS_RUNTIME=docker \
 
 - [API 能力面参考](api-surfaces-cn.md)
 - [核心能力参考](core-capabilities-cn.md)
+- [运行时与沙箱参考](runtime-and-sandbox-cn.md)
 - [快速上手](../guides/getting-started-cn.md)

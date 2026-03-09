@@ -12,6 +12,7 @@ If you are new to the repository, read these first:
 - [Core Capabilities Reference](reference/core-capabilities.md)
 - [API Surfaces Reference](reference/api-surfaces.md)
 - [Configuration Reference](reference/configuration.md)
+- [Runtime And Sandbox Reference](reference/runtime-and-sandbox.md)
 - [Architecture Overview](architecture/overview.md)
 - [Changelog](../CHANGELOG.md)
 - [Contributing Guide](../CONTRIBUTING.md)
@@ -39,6 +40,7 @@ Use this order if you want to understand the project quickly:
 - [Core Capabilities Reference](reference/core-capabilities.md)
 - [API Surfaces Reference](reference/api-surfaces.md)
 - [Configuration Reference](reference/configuration.md)
+- [Runtime And Sandbox Reference](reference/runtime-and-sandbox.md)
 
 ## Current Architecture
 
@@ -85,6 +87,7 @@ These folders are useful for contributors, but they are not the recommended firs
 - [Core Capabilities Reference](reference/core-capabilities.md)
 - [API Surfaces Reference](reference/api-surfaces.md)
 - [Configuration Reference](reference/configuration.md)
+- [Runtime And Sandbox Reference](reference/runtime-and-sandbox.md)
 - [Architecture Overview](architecture/overview.md)
 
 ### For platform / infra teams
@@ -92,6 +95,7 @@ These folders are useful for contributors, but they are not the recommended firs
 - [Architecture Overview](architecture/overview.md)
 - [API Surfaces Reference](reference/api-surfaces.md)
 - [Configuration Reference](reference/configuration.md)
+- [Runtime And Sandbox Reference](reference/runtime-and-sandbox.md)
 - [Multiprocess Acceptance](architecture/multiprocess-acceptance.md)
 - [Policy Engine](architecture/policy-engine.md)
 - [Licensing Decision](strategy/licensing-decision.md)
