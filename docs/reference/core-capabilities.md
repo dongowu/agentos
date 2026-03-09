@@ -59,6 +59,7 @@ workflow:
 ### Go control plane
 
 - `PolicyEngine` enforces allow / deny rules with deny-first precedence
+- `PolicyEngine` can block configured tool patterns with an `approval required` governance-gate reason
 - autonomy levels cover `supervised`, `semi`, and `autonomous` modes
 - `CredentialVault` uses opaque agent tokens so secrets stay out of general task payloads
 - per-agent rate limiting constrains action volume

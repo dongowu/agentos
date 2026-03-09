@@ -1,0 +1,25 @@
+# AgentOS Agent Config
+# Review-focused agent for PR analysis and change risk assessment.
+
+name: review-agent
+description: "Reviews code changes, highlights risks, and explains what needs follow-up before merge."
+
+model: gpt-4o-mini
+
+memory:
+  type: redis
+  ttl: 21600
+
+tools:
+  - file.read
+  - git.diff
+  - browser.search
+
+policy:
+  allow: ["file.read", "git.diff", "browser.*"]
+  deny: ["file.write", "git.commit", "shell.*"]
+
+workflow:
+  - inspect
+  - review
+  - summarize

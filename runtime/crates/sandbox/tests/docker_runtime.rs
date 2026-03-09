@@ -2,8 +2,6 @@
 
 use agentos_sandbox::docker::{DockerConfig, DockerRuntime};
 use agentos_sandbox::{ExecutionSpec, RuntimeAdapter};
-use std::path::PathBuf;
-
 #[test]
 fn docker_reports_name() {
     let rt = DockerRuntime::new(DockerConfig::default());
@@ -155,15 +153,16 @@ fn docker_refuses_root_mount() {
 
 #[test]
 fn docker_workspace_allowlist_blocks_outside_paths() {
+    let base = std::env::temp_dir().join("agentos-docker-allowlist");
     let rt = DockerRuntime::new(DockerConfig {
         mount_workspace: true,
-        allowed_workspace_roots: vec![PathBuf::from("/tmp/allowed")],
+        allowed_workspace_roots: vec![base.join("allowed")],
         ..DockerConfig::default()
     });
 
     let spec = ExecutionSpec {
         command: "ls".into(),
-        working_dir: Some(PathBuf::from("/tmp/blocked")),
+        working_dir: Some(base.join("blocked")),
         ..ExecutionSpec::default()
     };
     let result = rt.build_command_args(&spec);

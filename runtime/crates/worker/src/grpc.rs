@@ -449,13 +449,16 @@ impl RuntimeService for RuntimeServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agentos_sandbox::docker::{DockerConfig, DockerRuntime};
     use agentos_sandbox::native::NativeRuntime;
     use agentos_sandbox::security::{AutonomyLevel, SecurityPolicy};
     use futures::StreamExt;
+    #[cfg(unix)]
+    use agentos_sandbox::docker::{DockerConfig, DockerRuntime};
+    #[cfg(unix)]
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)]
     use std::sync::{Mutex, OnceLock};
 
     fn test_service() -> RuntimeServiceImpl {
@@ -468,6 +471,7 @@ mod tests {
         RuntimeServiceImpl::new(executor)
     }
 
+    #[cfg(unix)]
     fn test_service_docker() -> RuntimeServiceImpl {
         let runtime = Arc::new(DockerRuntime::new(DockerConfig::default()));
         let security = Arc::new(SecurityPolicy {
@@ -626,7 +630,11 @@ mod tests {
     #[tokio::test]
     async fn grpc_stream_output_emits_chunk_before_process_exit() {
         let svc = test_service();
-        let payload = serde_json::json!({"command": "echo first; sleep 0.2; echo second"});
+        #[cfg(target_os = "windows")]
+        let command = "echo first && ping -n 2 127.0.0.1 >nul && echo second";
+        #[cfg(not(target_os = "windows"))]
+        let command = "echo first; sleep 0.2; echo second";
+        let payload = serde_json::json!({"command": command});
         let req = Request::new(StreamOutputRequest {
             task_id: "t".into(),
             action_id: "action-1".into(),
@@ -635,7 +643,12 @@ mod tests {
         let resp = svc.stream_output(req).await.expect("stream should start");
         let mut stream = resp.into_inner();
 
-        let first = tokio::time::timeout(Duration::from_millis(150), stream.next())
+        #[cfg(target_os = "windows")]
+        let first_chunk_timeout = Duration::from_secs(2);
+        #[cfg(not(target_os = "windows"))]
+        let first_chunk_timeout = Duration::from_millis(150);
+
+        let first = tokio::time::timeout(first_chunk_timeout, stream.next())
             .await
             .expect("expected first chunk before command completes")
             .expect("expected stream item")
@@ -712,8 +725,12 @@ sys.stdout.flush()
     #[tokio::test]
     async fn grpc_with_env_vars() {
         let svc = test_service();
+        #[cfg(target_os = "windows")]
+        let command = "echo %TEST_GRPC_VAR%";
+        #[cfg(not(target_os = "windows"))]
+        let command = "echo $TEST_GRPC_VAR";
         let payload = serde_json::json!({
-            "command": "echo $TEST_GRPC_VAR",
+            "command": command,
             "env": {"TEST_GRPC_VAR": "grpc-env-value"}
         });
         let req = Request::new(ExecuteActionRequest {

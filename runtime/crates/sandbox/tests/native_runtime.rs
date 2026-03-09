@@ -128,8 +128,13 @@ async fn native_custom_env_vars() {
     let mut env = std::collections::HashMap::new();
     env.insert("MY_CUSTOM_VAR".into(), "custom_value".into());
 
+    #[cfg(target_os = "windows")]
+    let command = "echo %MY_CUSTOM_VAR%";
+    #[cfg(not(target_os = "windows"))]
+    let command = "echo $MY_CUSTOM_VAR";
+
     let spec = ExecutionSpec {
-        command: "echo $MY_CUSTOM_VAR".into(),
+        command: command.into(),
         env,
         ..ExecutionSpec::default()
     };

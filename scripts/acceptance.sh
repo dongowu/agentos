@@ -13,8 +13,7 @@ WORKER_ADDR=${AGENTOS_ACCEPTANCE_WORKER_ADDR:-127.0.0.1:15051}
 TASK_PROMPT=${AGENTOS_ACCEPTANCE_PROMPT:-echo acceptance-one then echo acceptance-two}
 EXPECTED_ACTIONS=${AGENTOS_ACCEPTANCE_EXPECTED_ACTIONS:-2}
 BRIDGE_CONTENT=${AGENTOS_ACCEPTANCE_BRIDGE_CONTENT:-bridge-acceptance}
-BRIDGE_FILE=${AGENTOS_ACCEPTANCE_BRIDGE_FILE:-$TMP_DIR/bridge-acceptance.txt}
-BRIDGE_PROMPT=${AGENTOS_ACCEPTANCE_BRIDGE_PROMPT:-write $BRIDGE_CONTENT to $BRIDGE_FILE then read $BRIDGE_FILE}
+BRIDGE_FILE=${AGENTOS_ACCEPTANCE_BRIDGE_FILE:-$ROOT_DIR/.tmp/agentos-acceptance/bridge-acceptance.txt}
 AUTH_TOKEN=${AGENTOS_ACCEPTANCE_AUTH_TOKEN:-acceptance-token}
 AUTH_PRINCIPAL=${AGENTOS_ACCEPTANCE_AUTH_PRINCIPAL:-acceptance-user|tenant-acceptance}
 GO_CACHE_DIR=${GOCACHE:-$TMP_DIR/go-build}
@@ -92,6 +91,7 @@ json_field() {
 echo "[acceptance] building Go binaries"
 GOCACHE="$GO_CACHE_DIR" go build -o "$BIN_DIR/controller" ./cmd/controller
 GOCACHE="$GO_CACHE_DIR" go build -o "$BIN_DIR/apiserver" ./cmd/apiserver
+GOCACHE="$GO_CACHE_DIR" go build -o "$BIN_DIR/acceptancejson" ./cmd/acceptancejson
 
 echo "[acceptance] building Rust worker"
 (
@@ -99,6 +99,8 @@ echo "[acceptance] building Rust worker"
   cargo build -p agentos-worker >/dev/null
 )
 WORKER_BIN="$ROOT_DIR/runtime/target/debug/agentos-worker"
+BRIDGE_FILE_NATIVE=$("$BIN_DIR/acceptancejson" native-path "$BRIDGE_FILE")
+BRIDGE_PROMPT=${AGENTOS_ACCEPTANCE_BRIDGE_PROMPT:-write $BRIDGE_CONTENT to $BRIDGE_FILE_NATIVE then read $BRIDGE_FILE_NATIVE}
 
 echo "[acceptance] starting controller on $CTRL_ADDR"
 AGENTOS_MODE=dev \
@@ -141,7 +143,7 @@ echo "[acceptance] submitting task through apiserver"
 SUBMIT_RESPONSE=$(curl -fsS -X POST "http://$API_ADDR/v1/tasks" \
   -H "Authorization: Bearer $AUTH_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d "{\"prompt\":\"$TASK_PROMPT\"}")
+  -d "$("$BIN_DIR/acceptancejson" create-task-request-body "$TASK_PROMPT")")
 TASK_ID=$(printf '%s' "$SUBMIT_RESPONSE" | json_field task_id)
 INITIAL_STATE=$(printf '%s' "$SUBMIT_RESPONSE" | json_field state)
 if [[ -z "$TASK_ID" ]]; then
@@ -172,12 +174,12 @@ fi
 
 echo "[acceptance] verifying task audit API"
 TASK_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$TASK_ID/audit")
-ACTION_COUNT=$(printf '%s' "$TASK_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; print(len(records))')
+ACTION_COUNT=$(printf '%s' "$TASK_AUDIT" | "$BIN_DIR/acceptancejson" task-audit-count)
 if [[ "$ACTION_COUNT" -lt "$EXPECTED_ACTIONS" ]]; then
   echo "expected at least $EXPECTED_ACTIONS audit records, got $ACTION_COUNT: $TASK_AUDIT"
   exit 1
 fi
-ACTION_ID=$(printf '%s' "$TASK_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; assert records, "no audit records returned"; print(records[-1]["action_id"])')
+ACTION_ID=$(printf '%s' "$TASK_AUDIT" | "$BIN_DIR/acceptancejson" task-audit-last-action-id)
 if [[ -z "$ACTION_ID" ]]; then
   echo "failed to parse action_id from task audit response: $TASK_AUDIT"
   exit 1
@@ -185,7 +187,7 @@ fi
 
 echo "[acceptance] verifying action audit API for action_id=$ACTION_ID"
 ACTION_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$TASK_ID/actions/$ACTION_ID/audit")
-ACTION_EXIT=$(printf '%s' "$ACTION_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get("exit_code", ""))')
+ACTION_EXIT=$(printf '%s' "$ACTION_AUDIT" | "$BIN_DIR/acceptancejson" action-audit-exit-code)
 if [[ "$ACTION_EXIT" != "0" ]]; then
   echo "unexpected action audit exit code: $ACTION_AUDIT"
   exit 1
@@ -193,7 +195,7 @@ fi
 
 echo "[acceptance] verifying global audit API"
 GLOBAL_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/audit?failed=false&limit=20")
-GLOBAL_MATCHES=$(printf '%s' "$GLOBAL_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; task_id=sys.argv[1]; print(sum(1 for r in records if r.get("task_id") == task_id and r.get("tenant_id") == "tenant-acceptance"))' "$TASK_ID")
+GLOBAL_MATCHES=$(printf '%s' "$GLOBAL_AUDIT" | "$BIN_DIR/acceptancejson" global-audit-match-count "$TASK_ID" "tenant-acceptance")
 if [[ "$GLOBAL_MATCHES" -lt 1 ]]; then
   echo "expected global audit feed to include accepted tenant record for task $TASK_ID: $GLOBAL_AUDIT"
   exit 1
@@ -210,7 +212,7 @@ echo "[acceptance] submitting bridge task through apiserver"
 BRIDGE_RESPONSE=$(curl -fsS -X POST "http://$API_ADDR/v1/tasks" \
   -H "Authorization: Bearer $AUTH_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d "{\"prompt\":\"$BRIDGE_PROMPT\"}")
+  -d "$("$BIN_DIR/acceptancejson" create-task-request-body "$BRIDGE_PROMPT")")
 BRIDGE_TASK_ID=$(printf '%s' "$BRIDGE_RESPONSE" | json_field task_id)
 BRIDGE_INITIAL_STATE=$(printf '%s' "$BRIDGE_RESPONSE" | json_field state)
 if [[ -z "$BRIDGE_TASK_ID" ]]; then
@@ -238,18 +240,18 @@ if [[ "$BRIDGE_FINAL_STATE" != "succeeded" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$BRIDGE_FILE" ]]; then
-  echo "bridge file was not created: $BRIDGE_FILE"
-  exit 1
+if [[ ! -f "$BRIDGE_FILE_NATIVE" ]]; then
+	 echo "bridge file was not created: $BRIDGE_FILE_NATIVE"
+	 exit 1
 fi
-BRIDGE_FILE_CONTENT=$(cat "$BRIDGE_FILE")
+BRIDGE_FILE_CONTENT=$(cat "$BRIDGE_FILE_NATIVE")
 if [[ "$BRIDGE_FILE_CONTENT" != "$BRIDGE_CONTENT" ]]; then
   echo "unexpected bridge file content: $BRIDGE_FILE_CONTENT"
   exit 1
 fi
 
 BRIDGE_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$BRIDGE_TASK_ID/audit")
-BRIDGE_LAST_WORKER=$(printf '%s' "$BRIDGE_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; assert records, "no bridge audit records returned"; print(records[-1].get("worker_id", ""))')
+BRIDGE_LAST_WORKER=$(printf '%s' "$BRIDGE_AUDIT" | "$BIN_DIR/acceptancejson" task-audit-last-worker-id)
 if [[ "$BRIDGE_LAST_WORKER" != "control-plane" ]]; then
   echo "expected bridge audit worker_id control-plane, got $BRIDGE_LAST_WORKER: $BRIDGE_AUDIT"
   exit 1

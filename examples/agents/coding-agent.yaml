@@ -1,14 +1,14 @@
-# ClawOS Agent Config
-# A coding assistant agent with file, git, and shell access.
+# AgentOS Agent Config
+# Coding-focused agent for implementation and refactoring work.
 
 name: coding-agent
-description: "An autonomous coding agent that can read, write, and refactor code."
+description: "Implements changes, edits files, and validates code with a practical software-team workflow."
 
-model: gemini-3.5-pro
+model: gpt-4o-mini
 
 memory:
   type: redis
-  ttl: 86400
+  ttl: 28800
 
 tools:
   - file.read

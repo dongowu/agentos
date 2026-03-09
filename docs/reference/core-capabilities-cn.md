@@ -59,6 +59,7 @@ workflow:
 ### Go 控制面
 
 - `PolicyEngine` 以 deny 优先的方式执行 allow / deny 规则
+- `PolicyEngine` 可以把配置命中的工具模式以 `approval required` 的治理门禁原因阻断
 - 自主级别覆盖 `supervised`、`semi`、`autonomous`
 - `CredentialVault` 使用不透明 agent token，避免通用任务载荷直接携带真实密钥
 - 单 agent 限流控制 action 频率

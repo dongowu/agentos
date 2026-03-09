@@ -115,10 +115,12 @@ Clients (CLI / API / SDK)
 如果你想看首页之外的细节，建议从这里继续：
 
 - [快速上手](docs/guides/getting-started-cn.md)
+- [研发系统集成 Playbook（英文）](docs/guides/integration-playbook.md)
 - [核心能力参考](docs/reference/core-capabilities-cn.md)
 - [API 能力面参考](docs/reference/api-surfaces-cn.md)
 - [配置参考](docs/reference/configuration-cn.md)
 - [运行时与沙箱参考](docs/reference/runtime-and-sandbox-cn.md)
+- [研发团队 Agent 模板](examples/agents/README.md)
 - [架构概览](docs/architecture/overview.md)
 - [多进程验收说明](docs/architecture/multiprocess-acceptance.md)
 - [文档导航](docs/README_CN.md)

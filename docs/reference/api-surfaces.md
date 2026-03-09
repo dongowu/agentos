@@ -51,6 +51,7 @@ Example response:
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/v1/tasks` | create a task |
+| `GET` | `/v1/agents` | list loaded agent profiles |
 | `GET` | `/v1/tasks/{task_id}` | fetch task state |
 | `GET` | `/v1/tasks/{task_id}/audit` | list persisted audit records for a task |
 | `GET` | `/v1/tasks/{task_id}/actions/{action_id}/audit` | fetch one action audit record |
@@ -58,6 +59,7 @@ Example response:
 | `GET` | `/v1/tasks/{task_id}/stream` | task-level SSE telemetry |
 | `GET` | `/v1/tasks/{task_id}/actions/{action_id}/stream` | action-level SSE telemetry |
 | `GET` | `/v1/audit` | query platform-level audit feed |
+| `GET` | `/v1/workers` | list registered worker nodes |
 
 ### `POST /v1/tasks`
 
@@ -99,6 +101,29 @@ Common errors:
 ```json
 {"error":"tenant mismatch"}
 ```
+
+### `GET /v1/agents`
+
+Success response shape:
+
+```json
+{
+  "agents": [
+    {
+      "name": "ops-agent",
+      "description": "Handles routine operator tasks",
+      "model": "gpt-4.1",
+      "tools": ["bash", "file.read"],
+      "workflow": ["plan", "execute"]
+    }
+  ]
+}
+```
+
+Notes:
+
+- returns the currently loaded agent profiles from the control-plane process
+- this is a read-only operator/developer view and does not mutate agent runtime state
 
 ### `GET /v1/tasks/{task_id}`
 
@@ -201,6 +226,31 @@ Success response shape:
   ]
 }
 ```
+
+### `GET /v1/workers`
+
+Success response shape:
+
+```json
+{
+  "workers": [
+    {
+      "id": "worker-1",
+      "addr": "127.0.0.1:9001",
+      "capabilities": ["docker", "native"],
+      "status": "online",
+      "last_heartbeat": "2026-03-09T00:00:00Z",
+      "active_tasks": 1,
+      "max_tasks": 4
+    }
+  ]
+}
+```
+
+Notes:
+
+- returns the workers currently registered in the control-plane registry
+- `last_heartbeat` is an RFC3339 timestamp emitted by Go's JSON time encoding
 
 ## Gateway API
 

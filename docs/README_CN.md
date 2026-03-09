@@ -9,6 +9,7 @@
 - [项目 README](../README.md)
 - [中文 README](../README_CN.md)
 - [快速上手](guides/getting-started-cn.md)
+- [研发系统集成 Playbook（英文）](guides/integration-playbook.md)
 - [核心能力参考](reference/core-capabilities-cn.md)
 - [API 能力面参考](reference/api-surfaces-cn.md)
 - [配置参考](reference/configuration-cn.md)
@@ -35,6 +36,7 @@
 
 - [指南索引](guides/README_CN.md)
 - [快速上手](guides/getting-started-cn.md)
+- [研发系统集成 Playbook（英文）](guides/integration-playbook.md)
 
 ## 参考
 
@@ -88,6 +90,7 @@
 
 - [项目 README](../README.md)
 - [快速上手](guides/getting-started-cn.md)
+- [研发系统集成 Playbook（英文）](guides/integration-playbook.md)
 - [核心能力参考](reference/core-capabilities-cn.md)
 - [API 能力面参考](reference/api-surfaces-cn.md)
 - [配置参考](reference/configuration-cn.md)
@@ -97,6 +100,7 @@
 ### 面向平台 / 基础设施团队
 
 - [架构概览](architecture/overview.md)
+- [研发系统集成 Playbook（英文）](guides/integration-playbook.md)
 - [API 能力面参考](reference/api-surfaces-cn.md)
 - [配置参考](reference/configuration-cn.md)
 - [运行时与沙箱参考](reference/runtime-and-sandbox-cn.md)

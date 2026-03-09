@@ -63,6 +63,25 @@ func TestApplyEnvOverrides_AuthTokens(t *testing.T) {
 	}
 }
 
+func TestApplyEnvOverrides_PolicyApprovalRequired(t *testing.T) {
+	t.Setenv("AGENTOS_POLICY_APPROVAL_REQUIRED", "shell, git.* , ,http.post")
+
+	cfg := ApplyEnvOverrides(Config{})
+	if len(cfg.Policy.Rules) != 1 {
+		t.Fatalf("expected 1 synthesized policy rule, got %d", len(cfg.Policy.Rules))
+	}
+	rule := cfg.Policy.Rules[0]
+	if rule.Agent != "*" {
+		t.Fatalf("expected wildcard agent rule, got %q", rule.Agent)
+	}
+	if len(rule.ApprovalRequired) != 3 {
+		t.Fatalf("expected 3 approval-required patterns, got %d", len(rule.ApprovalRequired))
+	}
+	if rule.ApprovalRequired[0] != "shell" || rule.ApprovalRequired[1] != "git.*" || rule.ApprovalRequired[2] != "http.post" {
+		t.Fatalf("unexpected approval-required patterns: %#v", rule.ApprovalRequired)
+	}
+}
+
 func TestApplyEnvOverrides_MessagingAndPersistence(t *testing.T) {
 	t.Setenv("AGENTOS_NATS_URL", "nats://nats.example.com:4222")
 	t.Setenv("AGENTOS_NATS_STREAM", "AGENTOS_TEST")

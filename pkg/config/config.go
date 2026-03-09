@@ -36,9 +36,10 @@ type PolicyConfig struct {
 
 // PolicyRuleConfig is a single policy rule from config.
 type PolicyRuleConfig struct {
-	Agent string   `yaml:"agent"`
-	Allow []string `yaml:"allow"`
-	Deny  []string `yaml:"deny"`
+	Agent            string   `yaml:"agent"`
+	Allow            []string `yaml:"allow"`
+	Deny             []string `yaml:"deny"`
+	ApprovalRequired []string `yaml:"approval_required"`
 }
 
 // AuthConfig configures caller authentication for HTTP task APIs.
@@ -199,7 +200,25 @@ func ApplyEnvOverrides(cfg Config) Config {
 	if rawTokens := os.Getenv("AGENTOS_AUTH_TOKENS"); rawTokens != "" {
 		cfg.Auth.Tokens = parseAuthTokens(rawTokens)
 	}
+	if rawApprovalRequired := os.Getenv("AGENTOS_POLICY_APPROVAL_REQUIRED"); rawApprovalRequired != "" {
+		cfg.Policy.Rules = append(cfg.Policy.Rules, PolicyRuleConfig{
+			Agent:            "*",
+			ApprovalRequired: parseList(rawApprovalRequired),
+		})
+	}
 	return cfg
+}
+
+func parseList(raw string) []string {
+	items := make([]string, 0)
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		items = append(items, entry)
+	}
+	return items
 }
 
 func parseAgentSecrets(raw string) map[string]string {
