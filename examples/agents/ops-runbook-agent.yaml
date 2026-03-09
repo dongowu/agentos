@@ -1,0 +1,26 @@
+# AgentOS Agent Config
+# Ops-focused agent for runbook execution and incident support.
+
+name: ops-runbook-agent
+description: "Follows operational runbooks, gathers evidence, and records next actions during incidents."
+
+model: gpt-4o-mini
+
+memory:
+  type: redis
+  ttl: 14400
+
+tools:
+  - file.read
+  - file.write
+  - shell.exec
+  - browser.search
+
+policy:
+  allow: ["file.*", "shell.exec", "browser.*"]
+  deny: ["shell.rm", "git.commit"]
+
+workflow:
+  - triage
+  - execute
+  - handoff

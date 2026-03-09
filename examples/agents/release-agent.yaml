@@ -1,0 +1,27 @@
+# AgentOS Agent Config
+# Release-focused agent for changelog drafting and release verification.
+
+name: release-agent
+description: "Prepares release notes, checks release readiness, and calls out blockers before shipping."
+
+model: gpt-4o-mini
+
+memory:
+  type: redis
+  ttl: 43200
+
+tools:
+  - file.read
+  - file.write
+  - git.diff
+  - git.commit
+  - shell.exec
+
+policy:
+  allow: ["file.*", "git.*", "shell.exec"]
+  deny: ["shell.rm"]
+
+workflow:
+  - inspect
+  - verify
+  - publish

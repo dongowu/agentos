@@ -115,10 +115,12 @@ At a high level:
 If you want details beyond the homepage, start here:
 
 - [Getting Started Guide](docs/guides/getting-started.md)
+- [Engineering Integration Playbook](docs/guides/integration-playbook.md)
 - [Core Capabilities Reference](docs/reference/core-capabilities.md)
 - [API Surfaces Reference](docs/reference/api-surfaces.md)
 - [Configuration Reference](docs/reference/configuration.md)
 - [Runtime And Sandbox Reference](docs/reference/runtime-and-sandbox.md)
+- [Software Team Agent Templates](examples/agents/README.md)
 - [Architecture Overview](docs/architecture/overview.md)
 - [Multiprocess Acceptance](docs/architecture/multiprocess-acceptance.md)
 - [Documentation Index](docs/README.md)
