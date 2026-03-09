@@ -333,17 +333,17 @@ cd runtime && cargo test --workspace
 | Stage 2: Agent System | LLM planner pipeline, Agent YAML DSL, Tools, Memory | Done |
 | Stage 3: Sandbox & Policy | Docker isolation, SecurityPolicy, PolicyEngine | Done |
 | Stage 4: Distributed | Worker registry, NATS scheduling, worker pool | Done |
-| Stage 5: Platform | Web UI (Claw Studio), SDK, Agent Marketplace | Planned |
+| Stage 5: Platform UX | Console, SDK, extension surfaces | Planned |
 
-## Open Core Model
+## Open Core Boundary
 
-AgentOS follows an **Open Core + Commercial** model:
+AgentOS publishes the repository core under **Apache-2.0** and keeps enterprise/cloud packaging outside the repository-core boundary.
 
 - **Community**: open-source self-hosted control plane, runtime, scheduler, audit and telemetry APIs
 - **Enterprise**: org governance, SSO / SCIM / RBAC, audit center, longer retention, support
 - **Cloud**: managed control plane, hosted console, upgrades, billing, SLA
 
-See `docs/strategy/open-core-commercialization.md`, `docs/strategy/licensing-decision.md`, and `docs/plans/2026-03-08-open-core-execution-plan.md` for the current packaging and rollout direction.
+For the public repository, the focus is the **Community** core: the self-hosted execution substrate, orchestration contracts, scheduling, audit, and telemetry surfaces. Licensing details live in `docs/strategy/licensing-decision.md`.
 
 ## Documentation
 
@@ -355,13 +355,8 @@ See `docs/strategy/open-core-commercialization.md`, `docs/strategy/licensing-dec
 - [Skill System](docs/architecture/skill-system.md)
 - [Policy Engine](docs/architecture/policy-engine.md)
 - [MVP Scope](docs/architecture/mvp-scope.md)
-- [Open Core Commercialization Strategy](docs/strategy/open-core-commercialization.md)
 - [Licensing Decision](docs/strategy/licensing-decision.md)
-- [Packaging Matrix](docs/strategy/packaging-matrix.md)
-- [Design Partner One-Pager](docs/strategy/design-partner-one-pager.md)
-- [Open Core 90-Day Execution Plan](docs/plans/2026-03-08-open-core-execution-plan.md)
 - [Platform vs Capability Boundary](docs/architecture/platform-vs-capability-boundary.md)
-- [Bootstrap Plan](docs/plans/2026-03-06-agentos-bootstrap-plan.md)
 
 ## Contributing
 

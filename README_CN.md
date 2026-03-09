@@ -334,17 +334,17 @@ cd runtime && cargo test --workspace
 | Stage 2: 智能体系 | LLM planner 流水线、Agent YAML DSL、工具、记忆 | 已完成 |
 | Stage 3: 沙箱与安全 | Docker 隔离、SecurityPolicy、PolicyEngine | 已完成 |
 | Stage 4: 分布式调度 | Worker 注册、NATS 调度、Worker 池 | 已完成 |
-| Stage 5: 商业化平台 | Web UI (Claw Studio)、SDK、Agent 市场 | 规划中 |
+| Stage 5: 平台体验与生态 | 控制台、SDK、扩展能力 | 规划中 |
 
-## Open Core 模式
+## Open Core 边界
 
-AgentOS 当前采用 **Open Core + Commercial** 模式：
+AgentOS 将仓库核心以 **Apache-2.0** 方式公开，并把企业增强和托管云能力放在仓库核心边界之外。
 
 - **Community**：开源、自部署的控制面、运行时、调度、audit 与 telemetry API
 - **Enterprise**：组织治理、SSO / SCIM / RBAC、审计中心、长周期保留、支持服务
 - **Cloud**：托管控制面、控制台、升级运维、计费与 SLA
 
-具体方案见 `docs/strategy/open-core-commercialization.md`、`docs/strategy/licensing-decision.md` 与 `docs/plans/2026-03-08-open-core-execution-plan.md`。
+对外公开的仓库重点是 **Community** 核心：可自部署的执行底座、编排契约、调度、审计与遥测能力。许可证与边界说明见 `docs/strategy/licensing-decision.md`。
 
 ## 文档
 
@@ -356,11 +356,7 @@ AgentOS 当前采用 **Open Core + Commercial** 模式：
 - [技能系统](docs/architecture/skill-system.md)
 - [策略引擎](docs/architecture/policy-engine.md)
 - [MVP 范围](docs/architecture/mvp-scope.md)
-- [Open Core 商业化策略](docs/strategy/open-core-commercialization.md)
 - [许可证决策](docs/strategy/licensing-decision.md)
-- [产品包装矩阵](docs/strategy/packaging-matrix.md)
-- [设计伙伴一页纸](docs/strategy/design-partner-one-pager.md)
-- [Open Core 90 天执行计划](docs/plans/2026-03-08-open-core-execution-plan.md)
 - [平台层与能力层边界](docs/architecture/platform-vs-capability-boundary.md)
 
 ## 贡献
