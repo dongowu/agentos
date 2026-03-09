@@ -1,0 +1,70 @@
+# AgentOS 文档导航
+
+这是 AgentOS 仓库文档的总入口页。
+
+## 从这里开始
+
+如果你第一次阅读这个仓库，建议先看：
+
+- [项目 README](../README.md)
+- [中文 README](../README_CN.md)
+- [贡献指南](../CONTRIBUTING.md)
+- [社区支持说明](../SUPPORT.md)
+- [安全策略](../SECURITY.md)
+
+## 推荐阅读路径
+
+如果你想快速理解项目，建议按这个顺序阅读：
+
+1. [架构概览](architecture/overview.md)
+2. [AgentOS v1 架构](architecture/agentos-v1-architecture.md)
+3. [Monorepo 结构](architecture/monorepo-structure.md)
+4. [平台层与能力层边界](architecture/platform-vs-capability-boundary.md)
+5. [多进程验收说明](architecture/multiprocess-acceptance.md)
+
+## 架构参考文档
+
+以下文档适合在理解整体之后按专题深入：
+
+- [可插拔适配器](architecture/adapters.md)
+- [技能系统](architecture/skill-system.md)
+- [策略引擎](architecture/policy-engine.md)
+- [MVP 范围](architecture/mvp-scope.md)
+- [ClawOS v1 架构](architecture/clawos-v1-architecture.md)
+
+## 仓库边界
+
+以下文档用于说明当前开源核心的边界：
+
+- [许可证决策](strategy/licensing-decision.md)
+- [平台层与能力层边界](architecture/platform-vs-capability-boundary.md)
+
+## 历史工作文档
+
+这些目录对贡献者和维护者有帮助，但不建议作为新读者的第一站：
+
+- `docs/plans/` — 实现计划、设计草稿、执行拆解
+- `docs/updates/` — 发布说明、项目更新、首发传播素材
+
+## 按角色推荐阅读
+
+### 面向开发者
+
+- [项目 README](../README.md)
+- [架构概览](architecture/overview.md)
+- [Monorepo 结构](architecture/monorepo-structure.md)
+- [技能系统](architecture/skill-system.md)
+
+### 面向平台 / 基础设施团队
+
+- [AgentOS v1 架构](architecture/agentos-v1-architecture.md)
+- [多进程验收说明](architecture/multiprocess-acceptance.md)
+- [策略引擎](architecture/policy-engine.md)
+- [许可证决策](strategy/licensing-decision.md)
+
+### 面向贡献者
+
+- [贡献指南](../CONTRIBUTING.md)
+- [社区支持说明](../SUPPORT.md)
+- [安全策略](../SECURITY.md)
+- `docs/plans/`

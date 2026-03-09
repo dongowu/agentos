@@ -347,14 +347,9 @@ For the public repository, the focus is the **Community** core: the self-hosted 
 
 ## Documentation
 
+- [Documentation Guide](docs/README.md)
 - [Architecture Overview](docs/architecture/overview.md)
-- [AgentOS v1 Architecture](docs/architecture/agentos-v1-architecture.md)
-- [ClawOS v1 Architecture](docs/architecture/clawos-v1-architecture.md)
-- [Monorepo Structure](docs/architecture/monorepo-structure.md)
-- [Pluggable Adapters](docs/architecture/adapters.md)
-- [Skill System](docs/architecture/skill-system.md)
-- [Policy Engine](docs/architecture/policy-engine.md)
-- [MVP Scope](docs/architecture/mvp-scope.md)
+- [Multiprocess Acceptance](docs/architecture/multiprocess-acceptance.md)
 - [Licensing Decision](docs/strategy/licensing-decision.md)
 - [Platform vs Capability Boundary](docs/architecture/platform-vs-capability-boundary.md)
 
