@@ -7,10 +7,12 @@
 - [项目 README](../../README.md)
 - [文档导航](../README_CN.md)
 - [快速上手](getting-started-cn.md)
+- [研发系统集成 Playbook（英文）](integration-playbook.md)
 
 ## 本目录内容
 
 - [快速上手](getting-started-cn.md) — 最快把仓库跑起来并理解第一条控制面链路
+- [研发系统集成 Playbook（英文）](integration-playbook.md) — 面向 Git、CI 与 runbook 工作流的实用接入说明
 - [Getting Started Guide](getting-started.md) — 同一套仓库启动与首轮流程的英文版说明
 
 ## 维护说明

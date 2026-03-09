@@ -9,6 +9,7 @@ If you are new to the repository, read these first:
 - [Project README](../README.md)
 - [Chinese README](../README_CN.md)
 - [Getting Started Guide](guides/getting-started.md)
+- [Engineering Integration Playbook](guides/integration-playbook.md)
 - [Core Capabilities Reference](reference/core-capabilities.md)
 - [API Surfaces Reference](reference/api-surfaces.md)
 - [Configuration Reference](reference/configuration.md)
@@ -35,6 +36,7 @@ Use this order if you want to understand the project quickly:
 
 - [Guides Index](guides/README.md)
 - [Getting Started Guide](guides/getting-started.md)
+- [Engineering Integration Playbook](guides/integration-playbook.md)
 
 ## Reference
 
@@ -88,6 +90,7 @@ These folders are useful for contributors, but they are not the recommended firs
 
 - [Project README](../README.md)
 - [Getting Started Guide](guides/getting-started.md)
+- [Engineering Integration Playbook](guides/integration-playbook.md)
 - [Core Capabilities Reference](reference/core-capabilities.md)
 - [API Surfaces Reference](reference/api-surfaces.md)
 - [Configuration Reference](reference/configuration.md)
@@ -97,6 +100,7 @@ These folders are useful for contributors, but they are not the recommended firs
 ### For platform / infra teams
 
 - [Architecture Overview](architecture/overview.md)
+- [Engineering Integration Playbook](guides/integration-playbook.md)
 - [API Surfaces Reference](reference/api-surfaces.md)
 - [Configuration Reference](reference/configuration.md)
 - [Runtime And Sandbox Reference](reference/runtime-and-sandbox.md)
