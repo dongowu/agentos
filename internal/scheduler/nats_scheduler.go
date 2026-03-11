@@ -42,13 +42,14 @@ type actionRequest struct {
 
 // actionResponse is the message workers publish back after execution.
 type actionResponse struct {
-	TaskID   string `json:"task_id"`
-	ActionID string `json:"action_id"`
-	ExitCode int    `json:"exit_code"`
-	Stdout   []byte `json:"stdout"`
-	Stderr   []byte `json:"stderr"`
-	WorkerID string `json:"worker_id"`
-	Error    string `json:"error,omitempty"`
+	TaskID    string `json:"task_id"`
+	ActionID  string `json:"action_id"`
+	ExitCode  int    `json:"exit_code"`
+	Stdout    []byte `json:"stdout"`
+	Stderr    []byte `json:"stderr"`
+	WorkerID  string `json:"worker_id"`
+	Error     string `json:"error,omitempty"`
+	ErrorCode string `json:"error_code,omitempty"`
 }
 
 func dispatchSubject(stream string) string {
@@ -126,9 +127,7 @@ func (s *NATSScheduler) subscribeResult(subject string) error {
 			Stderr:   resp.Stderr,
 			WorkerID: resp.WorkerID,
 		}
-		if resp.Error != "" {
-			ar.Error = fmt.Errorf("%s", resp.Error)
-		}
+		ar.Error = decodeActionError(resp.Error, resp.ErrorCode)
 		s.results <- ar
 	})
 	if err != nil {

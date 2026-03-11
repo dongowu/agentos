@@ -5,25 +5,82 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/dongowu/agentos/internal/access"
 	"github.com/dongowu/agentos/internal/gateway"
 	"github.com/dongowu/agentos/internal/messaging"
 	"github.com/dongowu/agentos/internal/persistence"
+	"github.com/dongowu/agentos/internal/worker"
 	"github.com/dongowu/agentos/pkg/events"
 )
 
 // Server exposes the HTTP API for task submission, agent run, and tool run.
 type Server struct {
-	Addr    string
-	API     access.TaskSubmissionAPI
-	Audit   persistence.AuditLogStore
-	Bus     messaging.EventBus
-	Auth    access.AuthProvider
-	Gateway *gateway.Handler
-	srv     *http.Server
+	Addr                     string
+	API                      access.TaskSubmissionAPI
+	Audit                    persistence.AuditLogStore
+	Bus                      messaging.EventBus
+	Auth                     access.AuthProvider
+	Gateway                  *gateway.Handler
+	SchedulerMode            string
+	SchedulerRecoveryEnabled bool
+	WorkerRegistry           healthWorkerRegistry
+	srv                      *http.Server
+}
+
+type healthWorkerRegistry interface {
+	List(ctx context.Context) ([]worker.WorkerInfo, error)
+	GetAvailable(ctx context.Context) ([]worker.WorkerInfo, error)
+}
+
+type healthResponse struct {
+	Status           string              `json:"status"`
+	SchedulerMode    string              `json:"scheduler_mode,omitempty"`
+	RecoveryEnabled  bool                `json:"recovery_enabled"`
+	DegradedReasons  []string            `json:"degraded_reasons,omitempty"`
+	CapacityWarnings []string            `json:"capacity_warnings,omitempty"`
+	Workers          *healthWorkerCounts `json:"workers,omitempty"`
+}
+
+type healthWorkerCounts struct {
+	Total            int `json:"total"`
+	Online           int `json:"online"`
+	Busy             int `json:"busy"`
+	Offline          int `json:"offline"`
+	AvailableWorkers int `json:"available_workers"`
+}
+
+type workerCapabilityCounts struct {
+	Name             string `json:"name"`
+	Total            int    `json:"total"`
+	Online           int    `json:"online"`
+	Busy             int    `json:"busy"`
+	Offline          int    `json:"offline"`
+	AvailableWorkers int    `json:"available_workers"`
+}
+
+type workerListSummary struct {
+	healthWorkerCounts
+	Capabilities []workerCapabilityCounts `json:"capabilities,omitempty"`
+}
+
+type workerListResponse struct {
+	Summary workerListSummary       `json:"summary"`
+	Workers []workerResponsePayload `json:"workers"`
+}
+
+type workerResponsePayload struct {
+	ID            string              `json:"id"`
+	Addr          string              `json:"addr"`
+	Capabilities  []string            `json:"capabilities,omitempty"`
+	Status        worker.WorkerStatus `json:"status"`
+	LastHeartbeat time.Time           `json:"last_heartbeat,omitempty"`
+	ActiveTasks   int                 `json:"active_tasks"`
+	MaxTasks      int                 `json:"max_tasks"`
 }
 
 // Start begins listening.
@@ -43,9 +100,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/ready", s.handleReady)
 	mux.HandleFunc("/v1/audit", s.handleAudit)
 	mux.HandleFunc("/v1/tasks", s.handleTasks)
 	mux.HandleFunc("/v1/tasks/", s.handleTaskByID)
+	mux.HandleFunc("/v1/workers", s.handleWorkers)
 	if s.Gateway != nil {
 		mux.HandleFunc("/agent/run", s.withAuthentication(s.Gateway.ServeAgentRun))
 		mux.HandleFunc("/agent/status", s.withAuthentication(s.Gateway.ServeAgentStatus))
@@ -55,8 +114,248 @@ func (s *Server) handler() http.Handler {
 	return mux
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	resp, _ := s.healthSnapshot(r.Context())
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	resp, ready := s.healthSnapshot(r.Context())
+	status := http.StatusOK
+	if !ready {
+		status = http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, resp)
+}
+
+func (s *Server) healthSnapshot(ctx context.Context) (healthResponse, bool) {
+	resp := healthResponse{
+		Status:          "ok",
+		SchedulerMode:   s.SchedulerMode,
+		RecoveryEnabled: s.SchedulerRecoveryEnabled,
+	}
+	ready := true
+	if s.WorkerRegistry != nil {
+		workers, err := s.WorkerRegistry.List(ctx)
+		if err != nil {
+			resp.Status = "degraded"
+			resp.DegradedReasons = append(resp.DegradedReasons, "worker registry unavailable")
+			ready = false
+		} else {
+			counts := summarizeHealthWorkers(workers)
+			resp.Workers = &counts
+			resp.CapacityWarnings = summarizeCapacityWarnings(workers)
+			if counts.AvailableWorkers == 0 {
+				resp.Status = "degraded"
+				resp.DegradedReasons = append(resp.DegradedReasons, "no available workers")
+				ready = false
+			}
+		}
+	}
+	return resp, ready
+}
+
+func summarizeHealthWorkers(workers []worker.WorkerInfo) healthWorkerCounts {
+	var counts healthWorkerCounts
+	counts.Total = len(workers)
+	for _, info := range workers {
+		switch info.Status {
+		case worker.StatusOnline:
+			counts.Online++
+			if info.MaxTasks <= 0 || info.ActiveTasks < info.MaxTasks {
+				counts.AvailableWorkers++
+			}
+		case worker.StatusBusy:
+			counts.Busy++
+		case worker.StatusOffline:
+			counts.Offline++
+		default:
+			if info.MaxTasks <= 0 || info.ActiveTasks < info.MaxTasks {
+				counts.AvailableWorkers++
+			}
+		}
+	}
+	return counts
+}
+
+func (s *Server) handleWorkers(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/v1/workers" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	ctx, _, ok := s.authenticateRequest(w, r)
+	if !ok {
+		return
+	}
+	if s.WorkerRegistry == nil {
+		http.Error(w, `{"error":"worker registry not configured"}`, http.StatusInternalServerError)
+		return
+	}
+	availableOnly, err := boolQueryValue(r, "available_only")
+	if err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+		return
+	}
+	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
+	capabilityFilter := strings.TrimSpace(r.URL.Query().Get("capability"))
+
+	var workers []worker.WorkerInfo
+	if availableOnly {
+		workers, err = s.WorkerRegistry.GetAvailable(ctx)
+	} else {
+		workers, err = s.WorkerRegistry.List(ctx)
+	}
+	if err != nil {
+		http.Error(w, `{"error":"worker registry unavailable"}`, http.StatusInternalServerError)
+		return
+	}
+	workers = filterWorkers(workers, statusFilter, capabilityFilter)
+	sort.Slice(workers, func(i, j int) bool {
+		return workers[i].ID < workers[j].ID
+	})
+
+	resp := workerListResponse{
+		Summary: summarizeWorkerList(workers),
+		Workers: make([]workerResponsePayload, 0, len(workers)),
+	}
+	for _, info := range workers {
+		resp.Workers = append(resp.Workers, workerResponsePayload{
+			ID:            info.ID,
+			Addr:          info.Addr,
+			Capabilities:  append([]string(nil), info.Capabilities...),
+			Status:        info.Status,
+			LastHeartbeat: info.LastHeartbeat,
+			ActiveTasks:   info.ActiveTasks,
+			MaxTasks:      info.MaxTasks,
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func summarizeWorkerList(workers []worker.WorkerInfo) workerListSummary {
+	return workerListSummary{
+		healthWorkerCounts: summarizeHealthWorkers(workers),
+		Capabilities:       summarizeWorkerCapabilities(workers),
+	}
+}
+
+func summarizeWorkerCapabilities(workers []worker.WorkerInfo) []workerCapabilityCounts {
+	if len(workers) == 0 {
+		return nil
+	}
+
+	byCapability := make(map[string]*workerCapabilityCounts)
+	for _, info := range workers {
+		seen := make(map[string]struct{}, len(info.Capabilities))
+		for _, capability := range info.Capabilities {
+			if capability == "" {
+				continue
+			}
+			if _, ok := seen[capability]; ok {
+				continue
+			}
+			seen[capability] = struct{}{}
+
+			counts := byCapability[capability]
+			if counts == nil {
+				counts = &workerCapabilityCounts{Name: capability}
+				byCapability[capability] = counts
+			}
+			counts.Total++
+			switch info.Status {
+			case worker.StatusOnline:
+				counts.Online++
+				if info.MaxTasks <= 0 || info.ActiveTasks < info.MaxTasks {
+					counts.AvailableWorkers++
+				}
+			case worker.StatusBusy:
+				counts.Busy++
+			case worker.StatusOffline:
+				counts.Offline++
+			default:
+				if info.MaxTasks <= 0 || info.ActiveTasks < info.MaxTasks {
+					counts.AvailableWorkers++
+				}
+			}
+		}
+	}
+
+	if len(byCapability) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(byCapability))
+	for name := range byCapability {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	out := make([]workerCapabilityCounts, 0, len(names))
+	for _, name := range names {
+		out = append(out, *byCapability[name])
+	}
+	return out
+}
+
+func summarizeCapacityWarnings(workers []worker.WorkerInfo) []string {
+	capabilities := summarizeWorkerCapabilities(workers)
+	if len(capabilities) == 0 {
+		return nil
+	}
+
+	warnings := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		if capability.Total > 0 && capability.AvailableWorkers == 0 {
+			warnings = append(warnings, "no available workers for capability "+capability.Name)
+		}
+	}
+	if len(warnings) == 0 {
+		return nil
+	}
+	return warnings
+}
+
+func filterWorkers(workers []worker.WorkerInfo, statusFilter, capabilityFilter string) []worker.WorkerInfo {
+	if statusFilter == "" && capabilityFilter == "" {
+		return workers
+	}
+
+	filtered := make([]worker.WorkerInfo, 0, len(workers))
+	for _, info := range workers {
+		if statusFilter != "" && string(info.Status) != statusFilter {
+			continue
+		}
+		if capabilityFilter != "" && !hasCapability(info.Capabilities, capabilityFilter) {
+			continue
+		}
+		filtered = append(filtered, info)
+	}
+	return filtered
+}
+
+func hasCapability(capabilities []string, target string) bool {
+	for _, capability := range capabilities {
+		if capability == target {
+			return true
+		}
+	}
+	return false
+}
+
+func boolQueryValue(r *http.Request, key string) (bool, error) {
+	raw := r.URL.Query().Get(key)
+	if raw == "" {
+		return false, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("invalid %s value", key)
+	}
+	return value, nil
 }
 
 func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {

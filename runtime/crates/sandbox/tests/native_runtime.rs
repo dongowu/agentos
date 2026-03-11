@@ -1,7 +1,18 @@
 //! Integration tests for NativeRuntime.
 
+#[cfg(not(target_os = "windows"))]
+#[path = "../../../test_support/env_lock.rs"]
+mod env_lock;
+#[cfg(not(target_os = "windows"))]
+#[path = "../../../test_support/temp_paths.rs"]
+mod temp_paths;
+
 use agentos_sandbox::native::NativeRuntime;
 use agentos_sandbox::{ExecutionSpec, RuntimeAdapter};
+#[cfg(not(target_os = "windows"))]
+use std::fs;
+#[cfg(not(target_os = "windows"))]
+use std::path::PathBuf;
 use std::time::Duration;
 
 #[tokio::test]
@@ -71,6 +82,48 @@ async fn native_timeout_kills_command() {
     assert!(err.to_string().contains("timed out"));
 }
 
+#[cfg(not(target_os = "windows"))]
+#[tokio::test]
+async fn native_timeout_cleans_up_shell_process() {
+    let rt = NativeRuntime::new();
+    if !rt.has_shell_access() {
+        return;
+    }
+
+    let work_dir = unique_test_dir("timeout-cleanup");
+    fs::create_dir_all(&work_dir).expect("temp dir should be created");
+    let pid_file = work_dir.join("shell.pid");
+
+    let spec = ExecutionSpec {
+        command: "echo $$ > shell.pid; sleep 60".into(),
+        working_dir: Some(work_dir.clone()),
+        timeout: Duration::from_millis(200),
+        ..ExecutionSpec::default()
+    };
+
+    let start = std::time::Instant::now();
+    let result = rt.execute(spec).await;
+    let elapsed = start.elapsed();
+    assert!(result.is_err(), "timeout command should fail");
+
+    let pid = wait_for_pid_file(&pid_file).await;
+    let still_running = process_is_running(pid);
+    if still_running {
+        force_kill_process(pid);
+    }
+
+    fs::remove_file(&pid_file).ok();
+    fs::remove_dir_all(&work_dir).ok();
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "timed out command took too long to return: {elapsed:?}"
+    );
+    assert!(
+        !still_running,
+        "timed out shell process {pid} was left running"
+    );
+}
+
 #[tokio::test]
 async fn native_output_truncation() {
     let rt = NativeRuntime::new();
@@ -101,6 +154,10 @@ async fn native_env_isolation() {
     }
 
     // Set a "secret" env var in this process, verify it doesn't leak
+    #[cfg(not(target_os = "windows"))]
+    let _secret = env_lock::ScopedEnvVar::set("AGENTOS_TEST_SECRET", "super-secret-value")
+        .expect("secret env var should be scoped");
+    #[cfg(target_os = "windows")]
     std::env::set_var("AGENTOS_TEST_SECRET", "super-secret-value");
 
     let spec = ExecutionSpec {
@@ -114,7 +171,7 @@ async fn native_env_isolation() {
         "secret env var leaked to child process"
     );
     assert!(stdout.contains("PATH="), "PATH should be passed through");
-
+    #[cfg(target_os = "windows")]
     std::env::remove_var("AGENTOS_TEST_SECRET");
 }
 
@@ -191,4 +248,44 @@ async fn native_without_shell_returns_error() {
     let result = rt.execute(spec).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("shell not found"));
+}
+
+#[cfg(not(target_os = "windows"))]
+fn unique_test_dir(label: &str) -> PathBuf {
+    temp_paths::unique_test_dir(&format!("native-runtime-{label}"))
+}
+
+#[cfg(not(target_os = "windows"))]
+async fn wait_for_pid_file(path: &PathBuf) -> u32 {
+    for _ in 0..20 {
+        if let Ok(contents) = fs::read_to_string(path) {
+            if let Ok(pid) = contents.trim().parse::<u32>() {
+                return pid;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("pid file was not created: {}", path.display());
+}
+
+#[cfg(not(target_os = "windows"))]
+fn process_is_running(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .arg("-0")
+        .arg(pid.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn force_kill_process(pid: u32) {
+    let _ = std::process::Command::new("kill")
+        .arg("-9")
+        .arg(pid.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
 }

@@ -266,7 +266,11 @@ Current behavior:
 - it registers itself with the controller `WorkerRegistry`
 - it advertises a worker id, listen address, capabilities, and max task count
 - it starts a heartbeat loop at the configured interval
+- duplicate registration refreshes the controller-side worker snapshot instead of failing hard
+- if heartbeats are rejected because the controller forgot the worker, the runtime treats that as a registration failure and re-registers
 - if no control-plane address is set, it skips registration and still serves execution locally
+
+Operationally, this means a worker restart with the same worker id is expected to converge back to a healthy online record without manual controller cleanup.
 
 ## Current Stable Runtime Surface
 

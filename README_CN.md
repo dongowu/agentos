@@ -42,7 +42,24 @@ AgentOS 当前更适合以下团队：
 
 按你的目标选择一条路径即可。
 
-### 1. 最快的本地验证路径
+### 1. 一键初始化开发环境
+
+```bash
+make dev-setup
+source .env.agentos.dev
+make dev-up
+```
+
+如果你想用最短路径拿到可重复的本地开发环境，这条路径会帮你完成二进制构建、生成可 `source` 的开发环境文件，并拉起完整本地栈。
+
+也可以直接运行底层脚本：
+
+```bash
+bash scripts/setup_dev_env.sh --verify-stack
+bash scripts/start_full_stack.sh --smoke-test --exit-after-smoke
+```
+
+### 2. 最快的本地验证路径
 
 ```bash
 # Terminal 1: 启动 Rust worker
@@ -55,7 +72,7 @@ go run ./cmd/osctl submit "echo hello"
 
 这条路径最适合快速确认执行底座本身能跑通。
 
-### 2. 开启 LLM 规划的本地路径
+### 3. 开启 LLM 规划的本地路径
 
 ```bash
 export AGENTOS_MODE=dev \
@@ -69,7 +86,7 @@ go run ./cmd/osctl submit "create a hello world python script"
 
 这条路径会在相同执行底座之上启用 LLM planner / agent loop 能力。
 
-### 3. 完整多进程验收
+### 4. 完整多进程验收
 
 ```bash
 ./scripts/acceptance.sh

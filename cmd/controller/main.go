@@ -15,6 +15,11 @@ import (
 	"google.golang.org/grpc"
 )
 
+const (
+	defaultHeartbeatTimeout    = 30 * time.Second
+	defaultHealthCheckInterval = 10 * time.Second
+)
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -50,7 +55,11 @@ func main() {
 
 	// Start HealthMonitor if registry is a MemoryRegistry.
 	if memReg, ok := app.WorkerRegistry.(*worker.MemoryRegistry); ok {
-		hm := worker.NewHealthMonitor(memReg, app.Bus, 30*time.Second, 10*time.Second)
+		heartbeatTimeout, healthCheckInterval := healthMonitorDurations(
+			app.Config.Scheduler.HeartbeatTimeout,
+			app.Config.Scheduler.HealthCheckInterval,
+		)
+		hm := worker.NewHealthMonitor(memReg, app.Bus, heartbeatTimeout, healthCheckInterval)
 		go hm.Start(ctx)
 		log.Println("HealthMonitor started")
 	}
@@ -66,4 +75,20 @@ func main() {
 	cancel()
 	grpcServer.GracefulStop()
 	log.Println("controller stopped")
+}
+
+func healthMonitorDurations(heartbeatTimeoutRaw, healthCheckIntervalRaw string) (time.Duration, time.Duration) {
+	return parseDurationOrDefault(heartbeatTimeoutRaw, defaultHeartbeatTimeout),
+		parseDurationOrDefault(healthCheckIntervalRaw, defaultHealthCheckInterval)
+}
+
+func parseDurationOrDefault(raw string, fallback time.Duration) time.Duration {
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return fallback
+	}
+	return d
 }

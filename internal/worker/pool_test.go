@@ -38,9 +38,9 @@ func (s *stubExecutor) getCalls() int {
 
 // stubDialer implements Dialer for tests.
 type stubDialer struct {
-	mu       sync.Mutex
+	mu        sync.Mutex
 	dialCount int
-	clients  map[string]runtimeclient.ExecutorClient
+	clients   map[string]runtimeclient.ExecutorClient
 }
 
 func (d *stubDialer) Dial(_ context.Context, addr string) (runtimeclient.ExecutorClient, error) {
@@ -89,6 +89,9 @@ func TestPool_SelectWorker_NoAvailable(t *testing.T) {
 	_, err := pool.SelectWorker(context.Background())
 	if err == nil {
 		t.Fatal("expected error when no workers available")
+	}
+	if !errors.Is(err, ErrNoAvailableWorkers) {
+		t.Fatalf("expected ErrNoAvailableWorkers, got %v", err)
 	}
 }
 

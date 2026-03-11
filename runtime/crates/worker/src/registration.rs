@@ -194,7 +194,8 @@ impl RegistrationClient {
         &self,
         active_tasks: u32,
     ) -> Result<HeartbeatResponse, RegistrationError> {
-        self.transport
+        let response = self
+            .transport
             .heartbeat(
                 &self.control_plane_addr,
                 HeartbeatRequest {
@@ -202,7 +203,11 @@ impl RegistrationClient {
                     active_tasks: active_tasks as i32,
                 },
             )
-            .await
+            .await?;
+        if !response.ok {
+            return Err(RegistrationError::Rejected);
+        }
+        Ok(response)
     }
 
     /// Deregister this worker from the control plane.
@@ -242,6 +247,20 @@ impl RegistrationClient {
                     }
                     Err(e) => {
                         eprintln!("[heartbeat] err worker={} {e}", self.worker_id);
+                        match self.register().await {
+                            Ok(resp) => {
+                                eprintln!(
+                                    "[heartbeat] re-registered worker={} accepted={}",
+                                    self.worker_id, resp.accepted
+                                );
+                            }
+                            Err(register_err) => {
+                                eprintln!(
+                                    "[heartbeat] re-register failed worker={} {register_err}",
+                                    self.worker_id
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -260,6 +279,7 @@ mod tests {
         heartbeats: Vec<(String, HeartbeatRequest)>,
         deregisters: Vec<(String, DeregisterRequest)>,
         accept_registration: bool,
+        accept_heartbeat: bool,
     }
 
     #[derive(Default)]
@@ -272,6 +292,7 @@ mod tests {
             Self {
                 state: Mutex::new(MockTransportState {
                     accept_registration: true,
+                    accept_heartbeat: true,
                     ..MockTransportState::default()
                 }),
             }
@@ -307,7 +328,9 @@ mod tests {
             state
                 .heartbeats
                 .push((control_plane_addr.to_string(), request));
-            Ok(HeartbeatResponse { ok: true })
+            Ok(HeartbeatResponse {
+                ok: state.accept_heartbeat,
+            })
         }
 
         async fn deregister(
@@ -397,6 +420,37 @@ mod tests {
         handle.abort();
 
         assert!(transport.heartbeat_count() >= 1);
+    }
+
+    #[tokio::test]
+    async fn heartbeat_loop_re_registers_after_rejected_heartbeat() {
+        let transport = Arc::new(MockTransport {
+            state: Mutex::new(MockTransportState {
+                accept_registration: true,
+                accept_heartbeat: false,
+                ..MockTransportState::default()
+            }),
+        });
+        let client = Arc::new(RegistrationClient::with_transport(
+            "reconnect-worker".into(),
+            "127.0.0.1:9999".into(),
+            "127.0.0.1:50052".into(),
+            vec!["shell".into()],
+            2,
+            transport.clone(),
+        ));
+
+        let active = Arc::new(AtomicU32::new(1));
+        let handle = client.start_heartbeat_loop(Duration::from_millis(20), active);
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        handle.abort();
+
+        let state = transport.state.lock().unwrap();
+        assert!(state.heartbeats.len() >= 1);
+        assert!(
+            state.registers.len() >= 1,
+            "expected heartbeat loop to re-register after a rejected heartbeat"
+        );
     }
 
     #[test]

@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/dongowu/agentos/internal/actionbridge"
 	"github.com/dongowu/agentos/internal/runtimeclient"
+	"github.com/dongowu/agentos/internal/worker"
 	"github.com/dongowu/agentos/pkg/taskdsl"
 	"github.com/nats-io/nats.go"
 )
@@ -68,6 +70,16 @@ func (s *fakeNATSSubscription) Unsubscribe() error {
 		}
 	})
 	return nil
+}
+
+type wrappedDispatcherNoAvailableWorkersError struct{}
+
+func (wrappedDispatcherNoAvailableWorkersError) Error() string {
+	return "dispatcher has no capacity"
+}
+
+func (wrappedDispatcherNoAvailableWorkersError) Unwrap() error {
+	return worker.ErrNoAvailableWorkers
 }
 
 func TestNATSScheduler_DispatchesThroughDispatcher(t *testing.T) {
@@ -201,5 +213,33 @@ func TestNATSDispatcher_BridgeExecutesWithoutWorker(t *testing.T) {
 
 	if len(pool.getExecLog()) != 0 {
 		t.Fatalf("expected no worker execution, got %d", len(pool.getExecLog()))
+	}
+}
+
+func TestNATSScheduler_PreservesTypedNoAvailableWorkersError(t *testing.T) {
+	js := newFakeJetStream()
+	pool := &fakePool{selErr: wrappedDispatcherNoAvailableWorkersError{}}
+	dispatcher := NewNATSDispatcher(js, "TEST", pool)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := dispatcher.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer dispatcher.Close()
+
+	sched := NewNATSScheduler(js, "TEST")
+	defer sched.Close()
+
+	if err := sched.Submit(ctx, "task-no-worker", &taskdsl.Action{ID: "act-no-worker", Kind: "command.exec"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	select {
+	case result := <-sched.Results():
+		if !errors.Is(result.Error, worker.ErrNoAvailableWorkers) {
+			t.Fatalf("expected typed no worker error, got %v", result.Error)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for NATS result")
 	}
 }

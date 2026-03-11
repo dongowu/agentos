@@ -44,6 +44,40 @@ func TestTaskRepository_RoundTripTenantID(t *testing.T) {
 	}
 }
 
+func TestTaskRepository_ListRecoverable(t *testing.T) {
+	dsn := os.Getenv("AGENTOS_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("AGENTOS_TEST_POSTGRES_DSN not set")
+	}
+	repo, err := NewTaskRepository(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("NewTaskRepository: %v", err)
+	}
+	defer repo.Close()
+
+	tasks := []*taskdsl.Task{
+		{ID: "task-pg-succeeded", Prompt: "done", State: "succeeded", CreatedAt: time.Unix(1_700_000_200, 0).UTC(), UpdatedAt: time.Unix(1_700_000_200, 0).UTC()},
+		{ID: "task-pg-running", Prompt: "run", State: "running", CreatedAt: time.Unix(1_700_000_210, 0).UTC(), UpdatedAt: time.Unix(1_700_000_210, 0).UTC()},
+		{ID: "task-pg-queued", Prompt: "queue", State: "queued", CreatedAt: time.Unix(1_700_000_220, 0).UTC(), UpdatedAt: time.Unix(1_700_000_220, 0).UTC()},
+	}
+	for _, task := range tasks {
+		if err := repo.Create(context.Background(), task); err != nil {
+			t.Fatalf("Create(%s): %v", task.ID, err)
+		}
+	}
+
+	got, err := repo.ListRecoverable(context.Background())
+	if err != nil {
+		t.Fatalf("ListRecoverable: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 recoverable tasks, got %d", len(got))
+	}
+	if got[0].ID != "task-pg-running" || got[1].ID != "task-pg-queued" {
+		t.Fatalf("unexpected recoverable order: %q, %q", got[0].ID, got[1].ID)
+	}
+}
+
 func TestAuditLogStore_QueryFiltersTenantFailureAndLimit(t *testing.T) {
 	dsn := os.Getenv("AGENTOS_TEST_POSTGRES_DSN")
 	if dsn == "" {

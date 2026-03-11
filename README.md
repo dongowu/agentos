@@ -42,7 +42,24 @@ Most agent projects are good at prompts and demos, but weak at execution infrast
 
 Choose the path that matches your goal.
 
-### 1. Fastest local run
+### 1. One-command dev bootstrap
+
+```bash
+make dev-setup
+source .env.agentos.dev
+make dev-up
+```
+
+Use this when you want the fastest path to a repeatable local development environment with built binaries, a sourceable dev env file, and the full local stack startup flow.
+
+You can also run the underlying scripts directly:
+
+```bash
+bash scripts/setup_dev_env.sh --verify-stack
+bash scripts/start_full_stack.sh --smoke-test --exit-after-smoke
+```
+
+### 2. Fastest local run
 
 ```bash
 # Terminal 1: start the Rust worker
@@ -55,7 +72,7 @@ go run ./cmd/osctl submit "echo hello"
 
 This is the fastest way to verify the execution substrate locally.
 
-### 2. Local run with LLM planning
+### 3. Local run with LLM planning
 
 ```bash
 export AGENTOS_MODE=dev \
@@ -69,7 +86,7 @@ go run ./cmd/osctl submit "create a hello world python script"
 
 This enables the LLM-backed planner / agent loop path on top of the same execution substrate.
 
-### 3. Full multiprocess acceptance
+### 4. Full multiprocess acceptance
 
 ```bash
 ./scripts/acceptance.sh

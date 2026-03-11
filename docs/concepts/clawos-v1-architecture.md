@@ -274,6 +274,11 @@ claw tool install
 claw agent publish
 ```
 
+- `claw dev` 用于本地控制面快速诊断：会同时检查公开的 `/health`（存活）与 `/ready`（可调度就绪）状态，展示 capability 级容量告警、当前可调度 worker、按 capability 聚合的可用容量，并列出当前可用 agent
+- `claw dev --output json` 可输出完整诊断快照（`schema_version=v1`、health / readiness / workers / agents）；默认 `--output text` 保留当前面向人工排障的摘要视图
+- `claw dev --output json --section workers` 可只输出单个诊断 section；也支持 `--section health,workers` 或重复传入 `--section` 来组合多个 section，当前支持 `health`、`ready`、`workers`、`agents`
+- `claw dev --require-ready` 与 `--require-capability native` 可把诊断结果直接转成脚本/CI 断言：仍会输出诊断信息，但在就绪性退化或 capability 无可调度容量时返回非零退出
+
 ---
 
 ## Claw Studio（Web UI）

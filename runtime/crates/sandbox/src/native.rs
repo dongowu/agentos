@@ -1,11 +1,11 @@
 //! Native runtime -- executes commands directly on the host OS.
 
 use crate::{
-    truncate_output, ExecutionResult, ExecutionSpec, RuntimeAdapter, RuntimeError, SAFE_ENV_VARS,
+    process_exec::execute_command, ExecutionResult, ExecutionSpec, RuntimeAdapter, RuntimeError,
+    SAFE_ENV_VARS,
 };
 use async_trait::async_trait;
 use std::path::PathBuf;
-use std::time::Instant;
 
 // ---------------------------------------------------------------------------
 // Shell detection (zeroclaw pattern)
@@ -161,30 +161,13 @@ impl RuntimeAdapter for NativeRuntime {
             cmd.env(k, v);
         }
 
-        cmd.stdout(std::process::Stdio::piped());
-        cmd.stderr(std::process::Stdio::piped());
-
-        let start = Instant::now();
-
-        let output = tokio::time::timeout(spec.timeout, cmd.output())
-            .await
-            .map_err(|_| RuntimeError::Timeout {
-                elapsed: spec.timeout,
-                context: None,
-            })?
-            .map_err(RuntimeError::IoError)?;
-
-        let duration = start.elapsed();
-
-        let (stdout, stdout_truncated) = truncate_output(&output.stdout, spec.max_output_bytes);
-        let (stderr, stderr_truncated) = truncate_output(&output.stderr, spec.max_output_bytes);
-
-        Ok(ExecutionResult {
-            exit_code: output.status.code().unwrap_or(-1),
-            stdout,
-            stderr,
-            duration,
-            truncated: stdout_truncated || stderr_truncated,
-        })
+        execute_command(
+            &mut cmd,
+            spec.timeout,
+            spec.max_output_bytes,
+            None,
+            RuntimeError::IoError,
+        )
+        .await
     }
 }

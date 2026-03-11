@@ -10,6 +10,9 @@ import (
 	"github.com/dongowu/agentos/pkg/taskdsl"
 )
 
+// ErrNoAvailableWorkers indicates the scheduler cannot currently place new work.
+var ErrNoAvailableWorkers = errors.New("no available workers")
+
 // Dialer creates an ExecutorClient for a given worker address.
 type Dialer interface {
 	Dial(ctx context.Context, addr string) (runtimeclient.ExecutorClient, error)
@@ -77,7 +80,7 @@ func (p *Pool) SelectWorker(ctx context.Context) (string, error) {
 		return "", err
 	}
 	if len(available) == 0 {
-		return "", errors.New("no available workers")
+		return "", ErrNoAvailableWorkers
 	}
 
 	// Sort by active tasks ascending, then by ID for determinism.

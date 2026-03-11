@@ -12,4 +12,5 @@ type TaskRepository interface {
 	Create(ctx context.Context, task *taskdsl.Task) error
 	Get(ctx context.Context, id string) (*taskdsl.Task, error)
 	Update(ctx context.Context, task *taskdsl.Task) error
+	ListRecoverable(ctx context.Context) ([]*taskdsl.Task, error)
 }

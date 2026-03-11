@@ -4,7 +4,31 @@
 
 ## 选择一条本地运行路径
 
-### 1. 最快验证执行底座
+### 1. 一键初始化开发环境
+
+适合希望用可重复方式完成本地初始化的场景：校验工具链、预热依赖、构建本地二进制、生成可 `source` 的 `.env.agentos.dev`，并可选执行整栈 smoke check。
+
+```bash
+make dev-setup
+source .env.agentos.dev
+make dev-up
+```
+
+常用变体：
+
+```bash
+# 只校验依赖并生成 env 文件
+make dev-setup ARGS=--check-only
+
+# 初始化后顺手做一次整栈 smoke check
+make dev-setup ARGS=--verify-stack
+
+# 查看启动帮助，或执行 smoke-only 启动
+make dev-up ARGS=--help
+make dev-up ARGS="--smoke-test --exit-after-smoke"
+```
+
+### 2. 最快验证执行底座
 
 适合先确认本地执行链路是否打通，再决定是否开启规划或完整控制面拓扑。
 
@@ -17,7 +41,7 @@ export AGENTOS_MODE=dev AGENTOS_WORKER_ADDR=localhost:50051
 go run ./cmd/osctl submit "echo hello"
 ```
 
-### 2. 开启 LLM 规划的本地路径
+### 3. 开启 LLM 规划的本地路径
 
 适合在同一套执行底座之上启用 planner / agent-loop 行为。
 
@@ -31,7 +55,7 @@ export AGENTOS_MODE=dev \
 go run ./cmd/osctl submit "create a hello world python script"
 ```
 
-### 3. 完整多进程验收
+### 4. 完整多进程验收
 
 适合验证真实的 `controller + apiserver + worker` 链路，包括调度、鉴权、审计、回放，以及 control-plane bridge。
 

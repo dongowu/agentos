@@ -142,25 +142,19 @@ func (r *TaskRepository) Create(ctx context.Context, task *taskdsl.Task) error {
 
 // Get implements persistence.TaskRepository.
 func (r *TaskRepository) Get(ctx context.Context, id string) (*taskdsl.Task, error) {
-	var t taskdsl.Task
-	var planJSON []byte
-	err := r.pool.QueryRow(ctx,
+	row := r.pool.QueryRow(ctx,
 		`SELECT id, prompt, tenant_id, agent_name, state, plan_json, created_at, updated_at
 		 FROM tasks WHERE id = $1`,
 		id,
-	).Scan(&t.ID, &t.Prompt, &t.TenantID, &t.AgentName, &t.State, &planJSON, &t.CreatedAt, &t.UpdatedAt)
+	)
+	t, err := scanTask(row)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
 		return nil, err
 	}
-	if len(planJSON) > 0 {
-		if err := json.Unmarshal(planJSON, &t.Plan); err != nil {
-			return nil, err
-		}
-	}
-	return &t, nil
+	return t, nil
 }
 
 // Update implements persistence.TaskRepository.
@@ -173,6 +167,47 @@ func (r *TaskRepository) Update(ctx context.Context, task *taskdsl.Task) error {
 		`UPDATE tasks SET prompt=$2, tenant_id=$3, agent_name=$4, state=$5, plan_json=$6, updated_at=$7 WHERE id=$1`,
 		task.ID, task.Prompt, task.TenantID, task.AgentName, task.State, planJSON, task.UpdatedAt)
 	return err
+}
+
+// ListRecoverable returns queued and running tasks in creation order.
+func (r *TaskRepository) ListRecoverable(ctx context.Context) ([]*taskdsl.Task, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, prompt, tenant_id, agent_name, state, plan_json, created_at, updated_at
+		FROM tasks
+		WHERE state IN ('queued', 'running')
+		ORDER BY created_at ASC, id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tasks []*taskdsl.Task
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}
+
+type taskScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanTask(scanner taskScanner) (*taskdsl.Task, error) {
+	var task taskdsl.Task
+	var planJSON []byte
+	if err := scanner.Scan(&task.ID, &task.Prompt, &task.TenantID, &task.AgentName, &task.State, &planJSON, &task.CreatedAt, &task.UpdatedAt); err != nil {
+		return nil, err
+	}
+	if len(planJSON) > 0 {
+		if err := json.Unmarshal(planJSON, &task.Plan); err != nil {
+			return nil, err
+		}
+	}
+	return &task, nil
 }
 
 // Append implements persistence.AuditLogStore.

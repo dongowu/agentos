@@ -266,7 +266,11 @@ Rust worker 会在执行前用 `SecurityPolicy` 做命令校验。
 - 然后向 controller 的 `WorkerRegistry` 注册
 - 上报 worker id、监听地址、capabilities 和 max task count
 - 按配置间隔启动心跳循环
+- 如果出现重复注册，controller 侧会刷新该 worker 的快照，而不是直接失败
+- 如果心跳因为 controller 已忘记该 worker 而被拒绝，runtime 会把它视为注册失效并主动重新注册
 - 如果没有设置 control-plane 地址，会跳过注册，但仍然可以本地提供执行服务
+
+从运维角度看，这意味着同一个 worker id 的进程重启后，理论上会重新收敛到健康在线状态，而不需要人工先清理 controller 中的旧记录。
 
 ## 当前稳定运行时面
 

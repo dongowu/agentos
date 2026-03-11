@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -25,6 +26,10 @@ type SchedulerConfig struct {
 	HeartbeatTimeout    string `yaml:"heartbeat_timeout"`
 	HealthCheckInterval string `yaml:"health_check_interval"`
 	ControlPlaneAddr    string `yaml:"control_plane_addr"`
+	SubmitRetries       int    `yaml:"submit_retries"`
+	SubmitRetryBackoff  string `yaml:"submit_retry_backoff"`
+	RecoveryEnabled     bool   `yaml:"recovery_enabled"`
+	StaleRunningTimeout string `yaml:"stale_running_timeout"`
 }
 
 // PolicyConfig configures the control-plane policy engine.
@@ -119,13 +124,21 @@ func Default() Config {
 			Provider: "postgres",
 			Postgres: PostgresConfig{DSN: "postgres://agentos:agentos@localhost:5432/agentos?sslmode=disable"},
 		},
-		LLM:       LLMConfig{Provider: "openai", Model: "gpt-4o", BaseURL: "https://api.openai.com"},
-		Memory:    MemoryConfig{Provider: "inmemory", TTL: "24h"},
-		AgentDir:  "agents",
-		Policy:    PolicyConfig{DefaultAutonomy: "supervised"},
-		Scheduler: SchedulerConfig{Mode: "nats", HeartbeatTimeout: "30s", HealthCheckInterval: "10s"},
-		Vault:     VaultConfig{AgentSecrets: map[string]string{}},
-		Auth:      AuthConfig{Tokens: map[string]AuthPrincipalConfig{}},
+		LLM:      LLMConfig{Provider: "openai", Model: "gpt-4o", BaseURL: "https://api.openai.com"},
+		Memory:   MemoryConfig{Provider: "inmemory", TTL: "24h"},
+		AgentDir: "agents",
+		Policy:   PolicyConfig{DefaultAutonomy: "supervised"},
+		Scheduler: SchedulerConfig{
+			Mode:                "nats",
+			HeartbeatTimeout:    "30s",
+			HealthCheckInterval: "10s",
+			SubmitRetries:       1,
+			SubmitRetryBackoff:  "25ms",
+			RecoveryEnabled:     true,
+			StaleRunningTimeout: "15m",
+		},
+		Vault: VaultConfig{AgentSecrets: map[string]string{}},
+		Auth:  AuthConfig{Tokens: map[string]AuthPrincipalConfig{}},
 	}
 }
 
@@ -152,9 +165,17 @@ func Dev() Config {
 		LLM:         LLMConfig{Provider: llmProvider, Model: model, BaseURL: baseURL, APIKey: apiKey},
 		Memory:      MemoryConfig{Provider: "inmemory"},
 		Policy:      PolicyConfig{DefaultAutonomy: "autonomous"},
-		Scheduler:   SchedulerConfig{Mode: "local", HeartbeatTimeout: "30s", HealthCheckInterval: "10s"},
-		Vault:       VaultConfig{AgentSecrets: map[string]string{}},
-		Auth:        AuthConfig{Tokens: map[string]AuthPrincipalConfig{}},
+		Scheduler: SchedulerConfig{
+			Mode:                "local",
+			HeartbeatTimeout:    "30s",
+			HealthCheckInterval: "10s",
+			SubmitRetries:       1,
+			SubmitRetryBackoff:  "25ms",
+			RecoveryEnabled:     true,
+			StaleRunningTimeout: "15m",
+		},
+		Vault: VaultConfig{AgentSecrets: map[string]string{}},
+		Auth:  AuthConfig{Tokens: map[string]AuthPrincipalConfig{}},
 	})
 }
 
@@ -168,6 +189,28 @@ func ApplyEnvOverrides(cfg Config) Config {
 	}
 	if mode := os.Getenv("AGENTOS_SCHEDULER_MODE"); mode != "" {
 		cfg.Scheduler.Mode = mode
+	}
+	if heartbeatTimeout := os.Getenv("AGENTOS_SCHEDULER_HEARTBEAT_TIMEOUT"); heartbeatTimeout != "" {
+		cfg.Scheduler.HeartbeatTimeout = heartbeatTimeout
+	}
+	if healthCheckInterval := os.Getenv("AGENTOS_SCHEDULER_HEALTH_CHECK_INTERVAL"); healthCheckInterval != "" {
+		cfg.Scheduler.HealthCheckInterval = healthCheckInterval
+	}
+	if retries := os.Getenv("AGENTOS_SCHEDULER_SUBMIT_RETRIES"); retries != "" {
+		if parsed, err := strconv.Atoi(retries); err == nil {
+			cfg.Scheduler.SubmitRetries = parsed
+		}
+	}
+	if backoff := os.Getenv("AGENTOS_SCHEDULER_SUBMIT_RETRY_BACKOFF"); backoff != "" {
+		cfg.Scheduler.SubmitRetryBackoff = backoff
+	}
+	if recoveryEnabled := os.Getenv("AGENTOS_SCHEDULER_RECOVERY_ENABLED"); recoveryEnabled != "" {
+		if parsed, err := strconv.ParseBool(recoveryEnabled); err == nil {
+			cfg.Scheduler.RecoveryEnabled = parsed
+		}
+	}
+	if staleTimeout := os.Getenv("AGENTOS_SCHEDULER_STALE_RUNNING_TIMEOUT"); staleTimeout != "" {
+		cfg.Scheduler.StaleRunningTimeout = staleTimeout
 	}
 	if natsURL := os.Getenv("AGENTOS_NATS_URL"); natsURL != "" {
 		cfg.Messaging.NATS.URL = natsURL

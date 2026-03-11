@@ -70,7 +70,7 @@ func (d *NATSDispatcher) handleMessage(ctx context.Context, msg *nats.Msg) {
 		execResult, execErr := d.bridge.Execute(ctx, req.TaskID, action, d.outputHook)
 		result.WorkerID = actionbridge.ControlPlaneWorkerID
 		if execErr != nil {
-			result.Error = execErr.Error()
+			result.Error, result.ErrorCode = encodeActionError(execErr)
 			d.publishResult(result)
 			return
 		}
@@ -84,7 +84,7 @@ func (d *NATSDispatcher) handleMessage(ctx context.Context, msg *nats.Msg) {
 	}
 	workerID, err := d.pool.SelectWorker(ctx)
 	if err != nil {
-		result.Error = err.Error()
+		result.Error, result.ErrorCode = encodeActionError(err)
 		d.publishResult(result)
 		return
 	}
@@ -92,7 +92,7 @@ func (d *NATSDispatcher) handleMessage(ctx context.Context, msg *nats.Msg) {
 	if streamer, ok := d.pool.(streamingWorkerPool); ok {
 		execResult, execErr := streamer.ExecuteStream(ctx, workerID, req.TaskID, action, d.outputHook)
 		if execErr != nil {
-			result.Error = execErr.Error()
+			result.Error, result.ErrorCode = encodeActionError(execErr)
 			d.publishResult(result)
 			return
 		}
@@ -106,7 +106,7 @@ func (d *NATSDispatcher) handleMessage(ctx context.Context, msg *nats.Msg) {
 	}
 	execResult, err := d.pool.Execute(ctx, workerID, req.TaskID, action)
 	if err != nil {
-		result.Error = err.Error()
+		result.Error, result.ErrorCode = encodeActionError(err)
 		d.publishResult(result)
 		return
 	}

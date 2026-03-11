@@ -36,7 +36,7 @@ func TestMemoryRegistry_RegisterAndList(t *testing.T) {
 	}
 }
 
-func TestMemoryRegistry_RegisterDuplicate(t *testing.T) {
+func TestMemoryRegistry_RegisterDuplicateRefreshesWorkerSnapshot(t *testing.T) {
 	reg := NewMemoryRegistry(30 * time.Second)
 	ctx := context.Background()
 
@@ -45,8 +45,36 @@ func TestMemoryRegistry_RegisterDuplicate(t *testing.T) {
 	if err := reg.Register(ctx, w); err != nil {
 		t.Fatalf("first Register: %v", err)
 	}
-	if err := reg.Register(ctx, w); err == nil {
-		t.Fatal("expected error on duplicate Register, got nil")
+	before, err := reg.List(ctx)
+	if err != nil {
+		t.Fatalf("List before refresh: %v", err)
+	}
+	firstBeat := before[0].LastHeartbeat
+	time.Sleep(5 * time.Millisecond)
+
+	updated := WorkerInfo{ID: "w-1", Addr: "localhost:9002", MaxTasks: 8, Capabilities: []string{"shell"}}
+	if err := reg.Register(ctx, updated); err != nil {
+		t.Fatalf("second Register: %v", err)
+	}
+
+	workers, err := reg.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(workers) != 1 {
+		t.Fatalf("expected 1 worker, got %d", len(workers))
+	}
+	if workers[0].Addr != "localhost:9002" {
+		t.Fatalf("expected address to refresh, got %q", workers[0].Addr)
+	}
+	if workers[0].MaxTasks != 8 {
+		t.Fatalf("expected max tasks 8, got %d", workers[0].MaxTasks)
+	}
+	if workers[0].Status != StatusOnline {
+		t.Fatalf("expected worker to be online after re-register, got %s", workers[0].Status)
+	}
+	if !workers[0].LastHeartbeat.After(firstBeat) {
+		t.Fatal("expected re-register to refresh LastHeartbeat")
 	}
 }
 

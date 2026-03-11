@@ -64,7 +64,7 @@ func TestRegister(t *testing.T) {
 	}
 }
 
-func TestRegisterDuplicate(t *testing.T) {
+func TestRegisterDuplicateRefreshesWorkerSnapshot(t *testing.T) {
 	client, cleanup := startTestServer(t)
 	defer cleanup()
 
@@ -83,12 +83,31 @@ func TestRegisterDuplicate(t *testing.T) {
 		t.Fatal("first register should be accepted")
 	}
 
-	resp2, err := client.Register(ctx, req)
+	updatedReq := &pb.RegisterRequest{
+		WorkerId: "w-dup",
+		Addr:     "127.0.0.1:9011",
+		MaxTasks: 5,
+	}
+	resp2, err := client.Register(ctx, updatedReq)
 	if err != nil {
 		t.Fatalf("second Register RPC failed: %v", err)
 	}
-	if resp2.Accepted {
-		t.Fatal("duplicate register should not be accepted")
+	if !resp2.Accepted {
+		t.Fatal("duplicate register should be accepted as a refresh")
+	}
+
+	listResp, err := client.ListWorkers(ctx, &pb.ListWorkersRequest{})
+	if err != nil {
+		t.Fatalf("ListWorkers failed: %v", err)
+	}
+	if len(listResp.Workers) != 1 {
+		t.Fatalf("expected 1 worker, got %d", len(listResp.Workers))
+	}
+	if listResp.Workers[0].GetAddr() != "127.0.0.1:9011" {
+		t.Fatalf("expected worker addr to stay refreshed, got %q", listResp.Workers[0].GetAddr())
+	}
+	if listResp.Workers[0].GetMaxTasks() != 5 {
+		t.Fatalf("expected max tasks 5, got %d", listResp.Workers[0].GetMaxTasks())
 	}
 }
 

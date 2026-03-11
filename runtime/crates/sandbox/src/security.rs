@@ -117,6 +117,11 @@ impl SecurityPolicy {
         match self.autonomy {
             AutonomyLevel::Autonomous => Ok(()),
             AutonomyLevel::SemiAutonomous => {
+                if contains_shell_control_operator(trimmed) && !matches_whitelist(self, trimmed) {
+                    return Err(SecurityError {
+                        message: "compound command requires explicit whitelist entry".into(),
+                    });
+                }
                 let base_cmd = extract_base_command(trimmed);
                 for pattern in &self.command_whitelist {
                     if glob_matches(pattern, trimmed) || pattern == base_cmd {
@@ -131,6 +136,11 @@ impl SecurityPolicy {
                 })
             }
             AutonomyLevel::Supervised => {
+                if contains_shell_control_operator(trimmed) && !matches_whitelist(self, trimmed) {
+                    return Err(SecurityError {
+                        message: "compound command requires explicit whitelist entry".into(),
+                    });
+                }
                 let base_cmd = extract_base_command(trimmed);
                 for pattern in &self.command_whitelist {
                     if glob_matches(pattern, trimmed) || pattern == base_cmd {
@@ -155,7 +165,7 @@ impl SecurityPolicy {
         let re = SECRET_RE.get_or_init(|| {
             let patterns = [
                 // API keys: sk-..., key-..., etc
-                r"(?:sk|api|key|token|secret|password|passwd|auth)[-_]?[a-zA-Z0-9]{16,}",
+                r"(?:sk|api|key|token|secret|password|passwd|auth|credential)[-_]?[a-zA-Z0-9]{16,}",
                 // Bearer tokens
                 r#"Bearer\s+[a-zA-Z0-9\-._~+/]+=*"#,
                 // AWS-style keys
@@ -163,7 +173,7 @@ impl SecurityPolicy {
                 // GitHub tokens
                 r"gh[pousr]_[A-Za-z0-9_]{36,}",
                 // Generic long hex/base64 secrets preceded by keyword
-                r#"(?:key|token|secret|password|apikey|api_key)[\s:=]+['"]?[a-zA-Z0-9+/\-_]{20,}['"]?"#,
+                r#"(?:key|token|secret|password|apikey|api_key|credential)[\s:=]+['"]?[a-zA-Z0-9+/\-_]{20,}['"]?"#,
             ];
             let combined = format!("(?i)(?:{})", patterns.join("|"));
             Regex::new(&combined).expect("secret redaction regex should compile")
@@ -172,9 +182,22 @@ impl SecurityPolicy {
     }
 }
 
+fn matches_whitelist(policy: &SecurityPolicy, cmd: &str) -> bool {
+    policy
+        .command_whitelist
+        .iter()
+        .any(|pattern| pattern == cmd || glob_matches(pattern, cmd))
+}
+
 /// Extract the base command name (first token) from a shell command string.
 fn extract_base_command(cmd: &str) -> &str {
     cmd.split_whitespace().next().unwrap_or("")
+}
+
+fn contains_shell_control_operator(cmd: &str) -> bool {
+    ["&&", "||", "|", ";", "$(", "`"]
+        .iter()
+        .any(|token| cmd.contains(token))
 }
 
 /// Simple glob matching: `*` matches any sequence of characters.
@@ -314,6 +337,15 @@ mod tests {
     }
 
     #[test]
+    fn redact_credential_assignment() {
+        let policy = SecurityPolicy::default();
+        let input = "CREDENTIAL=abc12345678901234567890";
+        let output = policy.redact_secrets(input);
+        assert!(!output.contains("abc12345678901234567890"));
+        assert!(output.contains("[REDACTED]"));
+    }
+
+    #[test]
     fn redact_preserves_safe_text() {
         let policy = SecurityPolicy::default();
         let input = "total 42\ndrwxr-xr-x 2 user user 4096 Jan 1 00:00 src";
@@ -336,5 +368,27 @@ mod tests {
     #[test]
     fn glob_matches_prefix_wildcard() {
         assert!(glob_matches("mkfs.*", "mkfs.ext4"));
+    }
+
+    #[test]
+    fn supervised_blocks_compound_command_with_shell_operators() {
+        let policy = SecurityPolicy {
+            autonomy: AutonomyLevel::Supervised,
+            ..SecurityPolicy::default()
+        };
+        let result = policy.validate_command("echo ok && rm -rf /tmp/demo");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("compound"));
+    }
+
+    #[test]
+    fn semi_autonomous_blocks_piped_command_with_whitelisted_prefix() {
+        let policy = SecurityPolicy {
+            autonomy: AutonomyLevel::SemiAutonomous,
+            ..SecurityPolicy::default()
+        };
+        let result = policy.validate_command("echo ok | cat");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("compound"));
     }
 }

@@ -43,6 +43,10 @@
 | scheduler mode | `nats` |
 | scheduler heartbeat timeout | `30s` |
 | scheduler health check interval | `10s` |
+| scheduler submit retries | `1` |
+| scheduler submit retry backoff | `25ms` |
+| scheduler startup recovery | `true` |
+| scheduler stale running timeout | `15m` |
 | agent dir | `agents` |
 
 ### 开发基线
@@ -62,6 +66,10 @@
 | scheduler mode | `local` |
 | scheduler heartbeat timeout | `30s` |
 | scheduler health check interval | `10s` |
+| scheduler submit retries | `1` |
+| scheduler submit retry backoff | `25ms` |
+| scheduler startup recovery | `true` |
+| scheduler stale running timeout | `15m` |
 
 ## Planner 选择说明
 
@@ -84,6 +92,12 @@
 | `AGENTOS_WORKER_ADDR` | 直连 Rust worker 的 gRPC 地址 | 生产默认 `localhost:50051`；开发模式下用于本地 worker 路径 |
 | `AGENTOS_CONTROL_PLANE_ADDR` | 共享 controller 注册中心地址 | 默认未设置 |
 | `AGENTOS_SCHEDULER_MODE` | 覆盖 scheduler 模式 | 基线默认决定 `nats` 或 `local` |
+| `AGENTOS_SCHEDULER_HEARTBEAT_TIMEOUT` | controller 健康监控判定 worker 过期的超时时间 | 基线默认 `30s` |
+| `AGENTOS_SCHEDULER_HEALTH_CHECK_INTERVAL` | controller 健康监控扫描间隔 | 基线默认 `10s` |
+| `AGENTOS_SCHEDULER_SUBMIT_RETRIES` | submit 遇到临时无可用 worker 时的重试次数 | 基线默认 `1` |
+| `AGENTOS_SCHEDULER_SUBMIT_RETRY_BACKOFF` | scheduler submit 重试之间的退避间隔 | 基线默认 `25ms` |
+| `AGENTOS_SCHEDULER_RECOVERY_ENABLED` | 是否在启动时恢复 queued/running 任务 | 基线默认 `true` |
+| `AGENTOS_SCHEDULER_STALE_RUNNING_TIMEOUT` | 启动恢复时判定 running 任务已过期的阈值 | 基线默认 `15m` |
 | `AGENTOS_NATS_URL` | NATS 连接地址 | `nats://localhost:4222` |
 | `AGENTOS_NATS_STREAM` | JetStream stream 名称 | `AGENTOS` |
 | `AGENTOS_POSTGRES_DSN` | Postgres DSN | `postgres://agentos:agentos@localhost:5432/agentos?sslmode=disable` |
@@ -112,6 +126,8 @@
 | 变量 | 用途 | 默认值 |
 |------|------|--------|
 | `GRPC_LISTEN_ADDR` | controller 的 worker registry gRPC 监听地址 | `:50052` |
+
+controller 内存注册表上的 `HealthMonitor` 现在也会读取 `AGENTOS_SCHEDULER_HEARTBEAT_TIMEOUT` 与 `AGENTOS_SCHEDULER_HEALTH_CHECK_INTERVAL`，因此可以直接通过环境变量调整 stale worker 检测窗口。
 
 ### Rust Worker Runtime
 
@@ -231,7 +247,6 @@ export AGENTOS_RUNTIME=docker \
 - 通过 env 调整 memory TTL / Redis 地址 / Redis 前缀
 - 通过 env 注入 policy rule 列表
 - 通过 env 切换 agent 目录
-- 通过 env 覆盖 scheduler timing
 
 这些能力目前更适合在代码里直接构造 `bootstrap.New(ctx, cfg)`，而不是只依赖 `bootstrap.FromEnv(ctx)`。
 

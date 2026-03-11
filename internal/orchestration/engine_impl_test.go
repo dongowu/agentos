@@ -17,6 +17,7 @@ import (
 	"github.com/dongowu/agentos/internal/runtimeclient"
 	"github.com/dongowu/agentos/internal/scheduler"
 	"github.com/dongowu/agentos/internal/tool"
+	"github.com/dongowu/agentos/internal/worker"
 	"github.com/dongowu/agentos/pkg/taskdsl"
 )
 
@@ -42,6 +43,8 @@ type mockScheduler struct {
 	results   chan scheduler.ActionResult
 	closed    bool
 	err       error
+	errs      []error
+	calls     int
 }
 
 type schedulerEntry struct {
@@ -54,6 +57,14 @@ func newMockScheduler() *mockScheduler {
 }
 
 func (m *mockScheduler) Submit(_ context.Context, taskID string, action *taskdsl.Action) error {
+	m.calls++
+	if len(m.errs) > 0 {
+		err := m.errs[0]
+		m.errs = m.errs[1:]
+		if err != nil {
+			return err
+		}
+	}
 	if m.err != nil {
 		return m.err
 	}
@@ -105,6 +116,16 @@ func (m mockSkillResolver) Resolve(action *taskdsl.Action) (string, error) {
 		return m.resolve(action)
 	}
 	return "default", nil
+}
+
+type wrappedNoAvailableWorkersError struct{}
+
+func (wrappedNoAvailableWorkersError) Error() string {
+	return "scheduler temporarily saturated"
+}
+
+func (wrappedNoAvailableWorkersError) Unwrap() error {
+	return worker.ErrNoAvailableWorkers
 }
 
 // --- tests ---
@@ -465,7 +486,7 @@ func TestEngineImpl_SchedulerError_FallsBackToDirectExecutor(t *testing.T) {
 	bus := msgmemory.NewEventBus()
 	planner := &StubPlanner{}
 	sched := newMockScheduler()
-	sched.err = fmt.Errorf("no available workers")
+	sched.err = worker.ErrNoAvailableWorkers
 	exec := &mockExecutor{result: &runtimeclient.ExecutionResult{ExitCode: 0}}
 	engine := NewEngineImpl(repo, bus, planner, nil, exec, nil, sched)
 	ctx := context.Background()
@@ -479,6 +500,94 @@ func TestEngineImpl_SchedulerError_FallsBackToDirectExecutor(t *testing.T) {
 	}
 	if task.State != string(Succeeded) {
 		t.Fatalf("expected state succeeded, got %s", task.State)
+	}
+}
+
+func TestEngineImpl_StartTask_RetriesTransientSchedulerError(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &StubPlanner{}
+	sched := newMockScheduler()
+	sched.errs = []error{wrappedNoAvailableWorkersError{}, nil}
+	engine := NewEngineImpl(repo, bus, planner, nil, nil, nil, sched)
+	ctx := context.Background()
+
+	task, err := engine.StartTask(ctx, "echo hello")
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if task.State != string(Running) {
+		t.Fatalf("expected state running after retry, got %s", task.State)
+	}
+	if sched.calls != 2 {
+		t.Fatalf("expected 2 submit attempts, got %d", sched.calls)
+	}
+	if len(sched.submitted) != 1 || sched.submitted[0].action.ID != "action-1" {
+		t.Fatalf("expected a successful retry submission for action-1, got %+v", sched.submitted)
+	}
+}
+
+func TestEngineImpl_StartTask_UsesConfiguredSchedulerRetryPolicy(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &StubPlanner{}
+	sched := newMockScheduler()
+	sched.errs = []error{wrappedNoAvailableWorkersError{}, wrappedNoAvailableWorkersError{}, nil}
+	engine := NewEngineImpl(repo, bus, planner, nil, nil, nil, sched).
+		WithSchedulerRetryPolicy(2, 0)
+	ctx := context.Background()
+
+	task, err := engine.StartTask(ctx, "echo hello")
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	if task.State != string(Running) {
+		t.Fatalf("expected state running after configured retries, got %s", task.State)
+	}
+	if sched.calls != 3 {
+		t.Fatalf("expected 3 submit attempts, got %d", sched.calls)
+	}
+}
+
+func TestEngineImpl_ProcessResults_RetriesTransientSchedulerError(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &recordingPlanner{plan: &taskdsl.Plan{Actions: []taskdsl.Action{
+		{ID: "action-1", Kind: "command.exec", RuntimeEnv: "default", Payload: map[string]any{"cmd": "echo first"}},
+		{ID: "action-2", Kind: "command.exec", RuntimeEnv: "default", Payload: map[string]any{"cmd": "echo second"}},
+	}}}
+	sched := newMockScheduler()
+	engine := NewEngineImpl(repo, bus, planner, nil, nil, nil, sched)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	task, err := engine.StartTask(ctx, "echo first then echo second")
+	if err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	sched.errs = []error{wrappedNoAvailableWorkersError{}, nil}
+
+	go engine.ProcessResults(ctx)
+	sched.results <- scheduler.ActionResult{TaskID: task.ID, ActionID: "action-1", ExitCode: 0}
+
+	for deadline := time.Now().Add(300 * time.Millisecond); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if len(sched.submitted) >= 2 && sched.calls >= 3 {
+			break
+		}
+	}
+	if sched.calls != 3 {
+		t.Fatalf("expected 3 submit attempts total, got %d", sched.calls)
+	}
+	if len(sched.submitted) != 2 {
+		t.Fatalf("expected second action to be submitted after retry, got %d submissions", len(sched.submitted))
+	}
+	if sched.submitted[1].action.ID != "action-2" {
+		t.Fatalf("expected action-2 after retry, got %s", sched.submitted[1].action.ID)
+	}
+
+	got, _ := repo.Get(ctx, task.ID)
+	if got.State == string(Failed) {
+		t.Fatalf("expected task to remain recoverable after retry, got %s", got.State)
 	}
 }
 

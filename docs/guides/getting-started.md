@@ -4,7 +4,31 @@ This guide expands on the homepage quick start and helps you pick the right loca
 
 ## Choose a Local Run Path
 
-### 1. Fastest substrate check
+### 1. One-command dev bootstrap
+
+Use this when you want a repeatable local setup that checks toolchains, warms dependencies, builds local binaries, writes a sourceable `.env.agentos.dev`, and optionally smoke-tests the full stack.
+
+```bash
+make dev-setup
+source .env.agentos.dev
+make dev-up
+```
+
+Useful variants:
+
+```bash
+# Only validate prerequisites and write the env file
+make dev-setup ARGS=--check-only
+
+# Bootstrap and run a full-stack smoke check
+make dev-setup ARGS=--verify-stack
+
+# Show startup help or run smoke-only startup flows
+make dev-up ARGS=--help
+make dev-up ARGS="--smoke-test --exit-after-smoke"
+```
+
+### 2. Fastest substrate check
 
 Use this when you want to prove the local execution path works before turning on planning or full control-plane topology.
 
@@ -17,7 +41,7 @@ export AGENTOS_MODE=dev AGENTOS_WORKER_ADDR=localhost:50051
 go run ./cmd/osctl submit "echo hello"
 ```
 
-### 2. Local run with LLM planning
+### 3. Local run with LLM planning
 
 Use this when you want the same execution substrate plus planner / agent-loop behavior.
 
@@ -31,7 +55,7 @@ export AGENTOS_MODE=dev \
 go run ./cmd/osctl submit "create a hello world python script"
 ```
 
-### 3. Full multiprocess acceptance
+### 4. Full multiprocess acceptance
 
 Use this when you want the real `controller + apiserver + worker` acceptance loop, including scheduling, auth, audit, replay, and the control-plane bridge.
 

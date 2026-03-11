@@ -6,7 +6,7 @@
 
 ## 鉴权模型
 
-- `GET /health` 为公开接口
+- `GET /health` 和 `GET /ready` 为公开接口
 - 当服务配置了 `AuthProvider` 时，`/v1/*` 路径要求 Bearer Token
 - gateway 路径（`/agent/run`、`/agent/status`、`/agent/list`、`/tool/run`）在启用鉴权时也要求 Bearer Token
 - 如果未启用鉴权，服务允许匿名访问
@@ -34,17 +34,37 @@ Authorization: Bearer <token>
 
 ## 核心 HTTP API
 
-### 健康检查
+### 健康检查与就绪检查
 
 | 方法 | 路径 | 用途 |
 |------|------|------|
-| `GET` | `/health` | 存活 / 基础健康检查 |
+| `GET` | `/health` | 存活检查 + scheduler / worker 容量摘要 |
+| `GET` | `/ready` | 基于同一份容量摘要的可调度就绪检查 |
 
 示例响应：
 
 ```json
-{"status":"ok"}
+{
+  "status": "ok",
+  "scheduler_mode": "nats",
+  "recovery_enabled": true,
+  "capacity_warnings": ["no available workers for capability docker"],
+  "workers": {
+    "total": 3,
+    "online": 1,
+    "busy": 1,
+    "offline": 1,
+    "available_workers": 1
+  }
+}
 ```
+
+运行说明：
+
+- `/health` 在 HTTP 服务存活时始终返回 `200`，即使响应体里显示 worker 容量已降级
+- `/ready` 只有在 worker registry 可读取且至少存在一个可调度 worker 槽位时才返回 `200`；否则返回 `503`
+- `status = degraded` 表示控制面当前没有可调度 worker 容量，或者无法读取 worker registry
+- `capacity_warnings` 用于提示 capability 级别的饥饿/耗尽，例如 `docker` 仍有注册 worker，但已经没有可调度槽位
 
 ### 任务提交与读取路径
 
@@ -58,6 +78,7 @@ Authorization: Bearer <token>
 | `GET` | `/v1/tasks/{task_id}/stream` | 任务级 SSE 遥测流 |
 | `GET` | `/v1/tasks/{task_id}/actions/{action_id}/stream` | 动作级 SSE 遥测流 |
 | `GET` | `/v1/audit` | 查询平台级审计流 |
+| `GET` | `/v1/workers` | 查看当前 worker registry 快照 |
 
 ### `POST /v1/tasks`
 
@@ -201,6 +222,178 @@ Authorization: Bearer <token>
   ]
 }
 ```
+
+### `GET /v1/workers`
+
+支持的查询参数：
+
+| 参数 | 用途 |
+|------|------|
+| `available_only` | 当为 `true/1` 时，仅返回当前可调度的 worker |
+| `status` | 仅返回 `status` 与给定值精确匹配的 worker，例如 `online` |
+| `capability` | 仅返回声明了指定能力的 worker，例如 `native` |
+
+成功响应结构：
+
+```json
+{
+  "summary": {
+    "total": 2,
+    "online": 1,
+    "busy": 1,
+    "offline": 0,
+    "available_workers": 1,
+    "capabilities": [
+      {
+        "name": "docker",
+        "total": 1,
+        "online": 0,
+        "busy": 1,
+        "offline": 0,
+        "available_workers": 0
+      },
+      {
+        "name": "native",
+        "total": 1,
+        "online": 1,
+        "busy": 0,
+        "offline": 0,
+        "available_workers": 1
+      }
+    ]
+  },
+  "workers": [
+    {
+      "id": "worker-1",
+      "addr": "127.0.0.1:5001",
+      "capabilities": ["native"],
+      "status": "online",
+      "last_heartbeat": "2026-03-11T00:00:00Z",
+      "active_tasks": 0,
+      "max_tasks": 2
+    }
+  ]
+}
+```
+
+说明：
+
+- 该接口与其他 `/v1/*` 路径一样，遵循相同的 Bearer Token 鉴权规则
+- `summary` 的统计语义与 `/health`、`/ready` 保持一致，但作用于当前返回的 worker 集合
+- `summary.capabilities` 会按 capability 名称排序，给出每个已声明 capability 的同口径统计
+- 如果一个 worker 同时声明多个 capability，它会分别计入每个匹配 capability 的桶中
+- 查询参数按 `AND` 组合，因此 `available_only=true&status=online&capability=native` 会返回三者交集
+- `available_only` 非法时返回 `400`
+
+## CLI 机器可读 schema
+
+仓库也对本地运维和自动化场景提供了稳定的机器可读 CLI 诊断输出。
+
+### `claw dev --output json`
+
+默认结构：
+
+```json
+{
+  "schema_version": "v1",
+  "health": { "status": "ok" },
+  "ready": { "status": "ok" },
+  "workers": {
+    "summary": {
+      "total": 1,
+      "online": 1,
+      "busy": 0,
+      "offline": 0,
+      "available_workers": 1,
+      "capabilities": [
+        {
+          "name": "native",
+          "total": 1,
+          "online": 1,
+          "busy": 0,
+          "offline": 0,
+          "available_workers": 1
+        }
+      ]
+    },
+    "workers": [
+      {
+        "id": "worker-1",
+        "addr": "127.0.0.1:5001",
+        "capabilities": ["native"],
+        "status": "online",
+        "active_tasks": 0,
+        "max_tasks": 2
+      }
+    ]
+  },
+  "agents": ["demo"]
+}
+```
+
+说明：
+
+- `schema_version` 当前固定为 `v1`
+- `--section` 会把输出裁剪到所选的顶层字段，同时保留 `schema_version`
+- `--section` 支持单个值、逗号分隔值（例如 `health,workers`），也支持重复传入 flag
+- 当前支持的 section 为 `health`、`ready`、`workers`、`agents`
+- `--require-ready` 会继续输出诊断内容，但只要 `/ready` 不是 `status=ok` 就返回非零退出码
+- `--require-capability` 支持重复传入或逗号分隔；只要任一所需 capability 缺失或 `available_workers <= 0`，就返回非零退出码
+
+### `osctl workers --output json`
+
+默认结构：
+
+```json
+{
+  "schema_version": "v1",
+  "summary": {
+    "total": 1,
+    "online": 1,
+    "busy": 0,
+    "offline": 0,
+    "available_workers": 1,
+    "capabilities": [
+      {
+        "name": "native",
+        "total": 1,
+        "online": 1,
+        "busy": 0,
+        "offline": 0,
+        "available_workers": 1
+      }
+    ]
+  },
+  "workers": [
+    {
+      "id": "worker-1",
+      "addr": "127.0.0.1:5001",
+      "capabilities": ["native"],
+      "status": "online",
+      "active_tasks": 0,
+      "max_tasks": 2
+    }
+  ]
+}
+```
+
+说明：
+
+- `schema_version` 当前固定为 `v1`
+- `--summary-only` 只保留 `schema_version` 与 `summary`
+- `--workers-only` 只保留 `schema_version` 与 `workers`
+- 面向人工的 table 输出还支持 `--no-capability-summary` 与 `--no-workers`，可裁剪终端显示而不改变 JSON 合约
+- `--unschedulable-only` 只保留当前不可调度的 worker（例如 `status != online`、零容量或已满载）
+- `--sort` 支持 `id`、`load`、`status`，`--limit` 会在过滤/排序后裁剪 worker 列表
+- `--require-count` 会在输出 worker 数量少于给定值时返回非零退出码
+- `--require-available-count` 会在输出 summary 里的可调度 worker 数量少于给定值时返回非零退出码
+- `--require-load-threshold` 会在当前输出任一 worker 的归一化负载（`active_tasks / max_tasks`）超过给定阈值时返回非零退出码
+- `--require-worker` 支持重复传入或逗号分隔；只要任一指定 worker id 不在当前输出结果中，就返回非零退出码
+- `--require-capability-count` 支持以 `capability=count` 形式重复传入或逗号分隔；只要当前输出的 worker 子集中某个 capability 数量低于要求，就返回非零退出码
+- `--require-capability-available-count` 支持以 `capability=count` 形式重复传入或逗号分隔；只要当前输出 capability 摘要里的可调度 worker 数量低于要求，就返回非零退出码
+- `--require-capability-online-count`、`--require-capability-busy-count`、`--require-capability-offline-count` 支持以 `capability=count` 形式重复传入或逗号分隔；只要当前输出 capability 摘要里的 `online` / `busy` / `offline` 数量低于要求，就返回非零退出码
+- `--require-status-count` 支持以 `status=count` 形式重复传入或逗号分隔；只要当前输出的 worker 子集中 `online` / `busy` / `offline` 数量低于要求，就返回非零退出码
+- 当 CLI 侧应用过滤或 limit 时，输出中的 `summary` 会重算，并与当前实际输出的 worker 子集保持一致
 
 ## Gateway API
 

@@ -1,8 +1,21 @@
 //! Integration tests for DockerRuntime (command construction only, no real Docker).
 
+#[cfg(unix)]
+#[path = "../../../test_support/env_lock.rs"]
+mod env_lock;
+#[cfg(unix)]
+#[path = "../../../test_support/temp_paths.rs"]
+mod temp_paths;
+
 use agentos_sandbox::docker::{DockerConfig, DockerRuntime};
 use agentos_sandbox::{ExecutionSpec, RuntimeAdapter};
+#[cfg(unix)]
+use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 
 #[test]
 fn docker_reports_name() {
@@ -336,4 +349,57 @@ async fn docker_execute_returns_clear_error_when_docker_not_found() {
             );
         }
     }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn docker_timeout_surfaces_clear_error_against_hung_fake_docker() {
+    let temp_dir = unique_test_dir("docker-timeout-cleanup");
+    fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    let docker_path = temp_dir.join("docker");
+
+    fs::write(
+        &docker_path,
+        "#!/bin/sh\n\n/bin/sleep 60\n",
+    )
+    .expect("fake docker script should be written");
+    let mut perms = fs::metadata(&docker_path)
+        .expect("fake docker script metadata should exist")
+        .permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&docker_path, perms).expect("fake docker script should be executable");
+
+    let original_path = std::env::var_os("PATH").unwrap_or_default();
+    let scoped_path = env_lock::prepend_path(&temp_dir, &original_path);
+    let _path = env_lock::ScopedEnvVar::set("PATH", &scoped_path).expect("PATH should be scoped");
+
+    let rt = DockerRuntime::new(DockerConfig::default());
+    let spec = ExecutionSpec {
+        command: "echo hello".into(),
+        timeout: Duration::from_secs(2),
+        ..ExecutionSpec::default()
+    };
+
+    let start = Instant::now();
+    let result = rt.execute(spec).await;
+    let elapsed = start.elapsed();
+
+    assert!(result.is_err(), "timeout command should fail");
+    assert!(
+        result.unwrap_err().to_string().contains("timed out"),
+        "timeout error should be surfaced clearly"
+    );
+
+    fs::remove_file(&docker_path).ok();
+    fs::remove_dir_all(&temp_dir).ok();
+
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "timed out docker command took too long to return: {elapsed:?}"
+    );
+}
+
+#[cfg(unix)]
+fn unique_test_dir(label: &str) -> PathBuf {
+    temp_paths::unique_test_dir(&format!("docker-runtime-{label}"))
 }

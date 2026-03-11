@@ -230,6 +230,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 		closers = append(closers, ec)
 	}
 	engine := orchestration.NewEngineImpl(repo, bus, planner, resolver, executor, policyEngine, sched).
+		WithSchedulerRetryPolicy(cfg.Scheduler.SubmitRetries, durationOrDefault(cfg.Scheduler.SubmitRetryBackoff, 25*time.Millisecond)).
 		WithMemoryHook(memoryHook).
 		WithVault(vault).
 		WithAuditStore(audit).
@@ -240,6 +241,12 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	if llmProv != nil {
 		engine.WithLLMProvider(llmProv, llmModel)
 		engine.WithTools(tool.AllTools())
+	}
+
+	if cfg.Scheduler.RecoveryEnabled {
+		if err := engine.RecoverTasks(ctx, durationOrDefault(cfg.Scheduler.StaleRunningTimeout, 15*time.Minute)); err != nil {
+			return nil, fmt.Errorf("startup recovery: %w", err)
+		}
 	}
 
 	go engine.ProcessResults(ctx)

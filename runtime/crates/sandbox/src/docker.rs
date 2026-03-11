@@ -1,12 +1,12 @@
 //! Docker runtime -- executes commands inside lightweight containers.
 
 use crate::{
-    truncate_output, ExecutionResult, ExecutionSpec, RuntimeAdapter, RuntimeError, SAFE_ENV_VARS,
+    process_exec::execute_command, ExecutionResult, ExecutionSpec, RuntimeAdapter, RuntimeError,
+    SAFE_ENV_VARS,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::time::Instant;
 
 /// Configuration for the Docker runtime.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,38 +175,22 @@ impl RuntimeAdapter for DockerRuntime {
 
         let mut cmd = tokio::process::Command::new("docker");
         cmd.args(&args);
-        cmd.stdout(std::process::Stdio::piped());
-        cmd.stderr(std::process::Stdio::piped());
-
-        let start = Instant::now();
-
-        let output = tokio::time::timeout(spec.timeout, cmd.output())
-            .await
-            .map_err(|_| RuntimeError::Timeout {
-                elapsed: spec.timeout,
-                context: Some("docker"),
-            })?
-            .map_err(|e| {
+        execute_command(
+            &mut cmd,
+            spec.timeout,
+            spec.max_output_bytes,
+            Some("docker"),
+            |e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
                     RuntimeError::ShellNotFound(
-                        "docker binary not found on PATH. Install Docker to use the Docker runtime.".into(),
+                        "docker binary not found on PATH. Install Docker to use the Docker runtime."
+                            .into(),
                     )
                 } else {
                     RuntimeError::IoError(e)
                 }
-            })?;
-
-        let duration = start.elapsed();
-
-        let (stdout, stdout_truncated) = truncate_output(&output.stdout, spec.max_output_bytes);
-        let (stderr, stderr_truncated) = truncate_output(&output.stderr, spec.max_output_bytes);
-
-        Ok(ExecutionResult {
-            exit_code: output.status.code().unwrap_or(-1),
-            stdout,
-            stderr,
-            duration,
-            truncated: stdout_truncated || stderr_truncated,
-        })
+            },
+        )
+        .await
     }
 }

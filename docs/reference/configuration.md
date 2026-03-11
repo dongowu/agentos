@@ -43,6 +43,10 @@ This means the main public control-plane entrypoints currently do **not** load a
 | scheduler mode | `nats` |
 | scheduler heartbeat timeout | `30s` |
 | scheduler health check interval | `10s` |
+| scheduler submit retries | `1` |
+| scheduler submit retry backoff | `25ms` |
+| scheduler startup recovery | `true` |
+| scheduler stale running timeout | `15m` |
 | agent dir | `agents` |
 
 ### Development baseline
@@ -62,6 +66,10 @@ This means the main public control-plane entrypoints currently do **not** load a
 | scheduler mode | `local` |
 | scheduler heartbeat timeout | `30s` |
 | scheduler health check interval | `10s` |
+| scheduler submit retries | `1` |
+| scheduler submit retry backoff | `25ms` |
+| scheduler startup recovery | `true` |
+| scheduler stale running timeout | `15m` |
 
 ## Planner Selection Notes
 
@@ -84,6 +92,12 @@ These variables are read by `pkg/config` and `internal/bootstrap`.
 | `AGENTOS_WORKER_ADDR` | direct Rust worker gRPC address | prod default `localhost:50051`; in dev it seeds local worker path |
 | `AGENTOS_CONTROL_PLANE_ADDR` | shared controller registry address | unset by default |
 | `AGENTOS_SCHEDULER_MODE` | scheduler mode override | baseline decides `nats` or `local` |
+| `AGENTOS_SCHEDULER_HEARTBEAT_TIMEOUT` | stale-worker timeout used by the controller health monitor | baseline default `30s` |
+| `AGENTOS_SCHEDULER_HEALTH_CHECK_INTERVAL` | controller health-monitor scan interval | baseline default `10s` |
+| `AGENTOS_SCHEDULER_SUBMIT_RETRIES` | retries when submit hits a transient no-worker condition | baseline default `1` |
+| `AGENTOS_SCHEDULER_SUBMIT_RETRY_BACKOFF` | backoff between scheduler submit retries | baseline default `25ms` |
+| `AGENTOS_SCHEDULER_RECOVERY_ENABLED` | enable startup recovery of queued/running tasks | baseline default `true` |
+| `AGENTOS_SCHEDULER_STALE_RUNNING_TIMEOUT` | age threshold for failing stale running tasks during recovery | baseline default `15m` |
 | `AGENTOS_NATS_URL` | NATS connection URL | `nats://localhost:4222` |
 | `AGENTOS_NATS_STREAM` | JetStream stream name | `AGENTOS` |
 | `AGENTOS_POSTGRES_DSN` | Postgres DSN | `postgres://agentos:agentos@localhost:5432/agentos?sslmode=disable` |
@@ -112,6 +126,8 @@ These variables are read by `pkg/config` and `internal/bootstrap`.
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `GRPC_LISTEN_ADDR` | controller gRPC listen address for worker registry | `:50052` |
+
+The controller's in-memory `HealthMonitor` now reads the same scheduler heartbeat settings from `AGENTOS_SCHEDULER_HEARTBEAT_TIMEOUT` and `AGENTOS_SCHEDULER_HEALTH_CHECK_INTERVAL`, so stale-worker detection can be tuned without code changes.
 
 ### Rust Worker Runtime
 
@@ -231,7 +247,6 @@ Examples include:
 - memory TTL / Redis address / Redis prefix on the public env surface
 - policy rule lists from env
 - agent directory selection from env
-- scheduler timing overrides via env
 
 Those knobs currently require constructing `bootstrap.New(ctx, cfg)` directly in code instead of relying only on `bootstrap.FromEnv(ctx)`.
 

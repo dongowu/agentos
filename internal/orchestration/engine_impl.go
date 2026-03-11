@@ -3,6 +3,7 @@ package orchestration
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/dongowu/agentos/internal/runtimeclient"
 	"github.com/dongowu/agentos/internal/scheduler"
 	"github.com/dongowu/agentos/internal/tool"
+	"github.com/dongowu/agentos/internal/worker"
 	"github.com/dongowu/agentos/pkg/events"
 	"github.com/dongowu/agentos/pkg/taskdsl"
 )
@@ -35,6 +37,8 @@ type EngineImpl struct {
 	llmModel      string
 	tools         []tool.Tool // tools available for agent loop
 	actionBridge  *actionbridge.Bridge
+	submitRetries int
+	submitBackoff time.Duration
 }
 
 // NewEngineImpl returns a new task engine.
@@ -59,6 +63,8 @@ func NewEngineImpl(
 		executor:      executor,
 		policy:        pol,
 		scheduler:     sched,
+		submitRetries: 1,
+		submitBackoff: 25 * time.Millisecond,
 	}
 }
 
@@ -83,6 +89,19 @@ func (e *EngineImpl) WithAuditStore(store persistence.AuditLogStore) *EngineImpl
 // WithActionBridge attaches a control-plane tool action bridge to the engine.
 func (e *EngineImpl) WithActionBridge(bridge *actionbridge.Bridge) *EngineImpl {
 	e.actionBridge = bridge
+	return e
+}
+
+// WithSchedulerRetryPolicy configures retries for transient scheduler submit failures.
+func (e *EngineImpl) WithSchedulerRetryPolicy(retries int, backoff time.Duration) *EngineImpl {
+	if retries < 0 {
+		retries = 0
+	}
+	if backoff < 0 {
+		backoff = 0
+	}
+	e.submitRetries = retries
+	e.submitBackoff = backoff
 	return e
 }
 
@@ -151,7 +170,7 @@ func (e *EngineImpl) StartTaskWithInput(ctx context.Context, input StartTaskInpu
 		if err := e.transition(ctx, task, Running); err != nil {
 			return task, err
 		}
-		if err := e.scheduler.Submit(ctx, task.ID, first); err != nil {
+		if err := e.submitScheduledAction(ctx, task.ID, first); err != nil {
 			if e.executor != nil || e.actionBridge != nil {
 				result, execErr := e.executeDirectFromIndex(ctx, task, 0, true, true)
 				if execErr != nil {
@@ -234,7 +253,7 @@ func (e *EngineImpl) ProcessResults(ctx context.Context) {
 				if err := e.transition(ctx, task, Running); err != nil {
 					continue
 				}
-				if err := e.scheduler.Submit(ctx, task.ID, nextAction); err != nil {
+				if err := e.submitScheduledAction(ctx, task.ID, nextAction); err != nil {
 					if e.executor != nil || e.actionBridge != nil {
 						_, _ = e.executeDirectFromIndex(ctx, task, nextIndex, true, true)
 					} else {
@@ -247,6 +266,43 @@ func (e *EngineImpl) ProcessResults(ctx context.Context) {
 			_ = e.transition(ctx, task, Succeeded)
 		}
 	}
+}
+
+func (e *EngineImpl) submitScheduledAction(ctx context.Context, taskID string, action *taskdsl.Action) error {
+	if e.scheduler == nil {
+		return fmt.Errorf("scheduler not configured")
+	}
+	attempts := e.submitRetries + 1
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		if err := e.scheduler.Submit(ctx, taskID, action); err != nil {
+			lastErr = err
+			if !isRetryableSchedulerError(err) || attempt == attempts-1 {
+				return err
+			}
+			if e.submitBackoff > 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(e.submitBackoff):
+				}
+			}
+			continue
+		}
+		return nil
+	}
+	return lastErr
+}
+
+func isRetryableSchedulerError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, worker.ErrNoAvailableWorkers)
 }
 
 func (e *EngineImpl) transition(ctx context.Context, task *taskdsl.Task, to TaskState) error {

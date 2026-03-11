@@ -58,6 +58,27 @@ func (r *TaskRepository) Update(ctx context.Context, task *taskdsl.Task) error {
 	return nil
 }
 
+// ListRecoverable returns queued and running tasks in creation order.
+func (r *TaskRepository) ListRecoverable(ctx context.Context) ([]*taskdsl.Task, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	out := make([]*taskdsl.Task, 0, len(r.tasks))
+	for _, task := range r.tasks {
+		switch task.State {
+		case "queued", "running":
+			out = append(out, task)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
 // AuditLogStore is an in-memory implementation of persistence.AuditLogStore.
 type AuditLogStore struct {
 	mu      sync.RWMutex

@@ -6,7 +6,7 @@ It is intended as a practical reference for the **current open-source platform s
 
 ## Authentication Model
 
-- `GET /health` is public
+- `GET /health` and `GET /ready` are public
 - `/v1/*` routes require a bearer token when `AuthProvider` is configured
 - gateway routes (`/agent/run`, `/agent/status`, `/agent/list`, `/tool/run`) also require a bearer token when auth is configured
 - when auth is disabled, the server allows unauthenticated access
@@ -34,17 +34,37 @@ Authorization: Bearer <token>
 
 ## Core HTTP API
 
-### Health
+### Health And Readiness
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/health` | liveness / basic health check |
+| `GET` | `/health` | liveness plus scheduler / worker capacity summary |
+| `GET` | `/ready` | schedulability readiness using the same summary payload |
 
 Example response:
 
 ```json
-{"status":"ok"}
+{
+  "status": "ok",
+  "scheduler_mode": "nats",
+  "recovery_enabled": true,
+  "capacity_warnings": ["no available workers for capability docker"],
+  "workers": {
+    "total": 3,
+    "online": 1,
+    "busy": 1,
+    "offline": 1,
+    "available_workers": 1
+  }
+}
 ```
+
+Operational note:
+
+- `/health` always returns `200` while the HTTP server is alive, even if the payload reports degraded worker capacity
+- `/ready` returns `200` only when the worker registry is readable and at least one worker slot is currently schedulable; otherwise it returns `503`
+- `status = degraded` means the control plane currently has no schedulable worker capacity or cannot read the worker registry
+- `capacity_warnings` highlights capability-specific starvation such as `docker` having registered workers but no schedulable slots
 
 ### Task Submission And Read Paths
 
@@ -58,6 +78,7 @@ Example response:
 | `GET` | `/v1/tasks/{task_id}/stream` | task-level SSE telemetry |
 | `GET` | `/v1/tasks/{task_id}/actions/{action_id}/stream` | action-level SSE telemetry |
 | `GET` | `/v1/audit` | query platform-level audit feed |
+| `GET` | `/v1/workers` | inspect current worker registry snapshots |
 
 ### `POST /v1/tasks`
 
@@ -201,6 +222,178 @@ Success response shape:
   ]
 }
 ```
+
+### `GET /v1/workers`
+
+Supported query parameters:
+
+| Query | Purpose |
+|-------|---------|
+| `available_only` | when `true/1`, return only schedulable workers |
+| `status` | return only workers whose status exactly matches the provided value, for example `online` |
+| `capability` | return only workers advertising the provided capability, for example `native` |
+
+Success response shape:
+
+```json
+{
+  "summary": {
+    "total": 2,
+    "online": 1,
+    "busy": 1,
+    "offline": 0,
+    "available_workers": 1,
+    "capabilities": [
+      {
+        "name": "docker",
+        "total": 1,
+        "online": 0,
+        "busy": 1,
+        "offline": 0,
+        "available_workers": 0
+      },
+      {
+        "name": "native",
+        "total": 1,
+        "online": 1,
+        "busy": 0,
+        "offline": 0,
+        "available_workers": 1
+      }
+    ]
+  },
+  "workers": [
+    {
+      "id": "worker-1",
+      "addr": "127.0.0.1:5001",
+      "capabilities": ["native"],
+      "status": "online",
+      "last_heartbeat": "2026-03-11T00:00:00Z",
+      "active_tasks": 0,
+      "max_tasks": 2
+    }
+  ]
+}
+```
+
+Notes:
+
+- this route follows the same bearer-token behavior as the rest of `/v1/*`
+- `summary` uses the same counting semantics as `/health` and `/ready`, applied to the returned worker set
+- `summary.capabilities` adds the same counts per advertised capability, sorted by capability name
+- workers advertising multiple capabilities contribute to each matching capability bucket
+- query filters compose with `AND`, so `available_only=true&status=online&capability=native` narrows to the intersection
+- invalid `available_only` values return `400`
+
+## CLI machine-readable schemas
+
+The repo also exposes stable machine-readable CLI diagnostics for local operators and automation.
+
+### `claw dev --output json`
+
+Default shape:
+
+```json
+{
+  "schema_version": "v1",
+  "health": { "status": "ok" },
+  "ready": { "status": "ok" },
+  "workers": {
+    "summary": {
+      "total": 1,
+      "online": 1,
+      "busy": 0,
+      "offline": 0,
+      "available_workers": 1,
+      "capabilities": [
+        {
+          "name": "native",
+          "total": 1,
+          "online": 1,
+          "busy": 0,
+          "offline": 0,
+          "available_workers": 1
+        }
+      ]
+    },
+    "workers": [
+      {
+        "id": "worker-1",
+        "addr": "127.0.0.1:5001",
+        "capabilities": ["native"],
+        "status": "online",
+        "active_tasks": 0,
+        "max_tasks": 2
+      }
+    ]
+  },
+  "agents": ["demo"]
+}
+```
+
+Notes:
+
+- `schema_version` is currently `v1`
+- `--section` trims the response to the selected top-level keys while preserving `schema_version`
+- `--section` accepts a single value, a comma-separated list such as `health,workers`, or repeated flags
+- supported sections are `health`, `ready`, `workers`, and `agents`
+- `--require-ready` still emits the diagnostics payload, but returns a non-zero exit when `/ready` reports anything other than `status=ok`
+- `--require-capability` is repeatable / comma-separated and returns a non-zero exit when any requested capability has `available_workers <= 0` or is absent from the summary
+
+### `osctl workers --output json`
+
+Default shape:
+
+```json
+{
+  "schema_version": "v1",
+  "summary": {
+    "total": 1,
+    "online": 1,
+    "busy": 0,
+    "offline": 0,
+    "available_workers": 1,
+    "capabilities": [
+      {
+        "name": "native",
+        "total": 1,
+        "online": 1,
+        "busy": 0,
+        "offline": 0,
+        "available_workers": 1
+      }
+    ]
+  },
+  "workers": [
+    {
+      "id": "worker-1",
+      "addr": "127.0.0.1:5001",
+      "capabilities": ["native"],
+      "status": "online",
+      "active_tasks": 0,
+      "max_tasks": 2
+    }
+  ]
+}
+```
+
+Notes:
+
+- `schema_version` is currently `v1`
+- `--summary-only` keeps only `schema_version` and `summary`
+- `--workers-only` keeps only `schema_version` and `workers`
+- human-oriented table mode also supports `--no-capability-summary` and `--no-workers` to trim terminal output without changing the JSON contract
+- `--unschedulable-only` keeps only workers that are not currently schedulable (`status != online`, zero capacity, or saturated load)
+- `--sort` supports `id`, `load`, and `status`; `--limit` trims the worker list after filtering/sorting
+- `--require-count` returns a non-zero exit unless the emitted worker set contains at least that many workers
+- `--require-available-count` returns a non-zero exit unless the emitted summary reports at least that many schedulable workers
+- `--require-load-threshold` returns a non-zero exit when any emitted worker's normalized load (`active_tasks / max_tasks`) exceeds the provided threshold
+- `--require-worker` is repeatable / comma-separated and returns a non-zero exit when any requested worker id is absent from the emitted worker set
+- `--require-capability-count` is repeatable / comma-separated as `capability=count` and returns a non-zero exit when the emitted worker subset exposes fewer matching capability slots than required
+- `--require-capability-available-count` is repeatable / comma-separated as `capability=count` and returns a non-zero exit when the emitted capability summary exposes fewer schedulable workers for that capability than required
+- `--require-capability-online-count`, `--require-capability-busy-count`, and `--require-capability-offline-count` are repeatable / comma-separated as `capability=count` and return a non-zero exit when the emitted capability summary has fewer matching `online`, `busy`, or `offline` workers than required
+- `--require-status-count` is repeatable / comma-separated as `status=count` and returns a non-zero exit when the emitted worker subset has fewer `online`, `busy`, or `offline` workers than required
+- when CLI-side filtering or limiting is applied, the emitted `summary` is recomputed to match the emitted worker subset
 
 ## Gateway API
 

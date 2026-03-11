@@ -137,9 +137,19 @@
 
 ```
 osctl submit
+osctl workers
 osctl logs
 osctl tasks
 ```
+
+- `osctl workers --server http://127.0.0.1:8080 --available` 可通过控制面 API 查看当前可调度 worker 容量
+- `osctl workers --server http://127.0.0.1:8080 --status online --capability native` 可按状态和能力收窄 worker 视图
+- `osctl workers` 现在会额外打印按 capability 聚合的容量摘要，并以列式 table 展示 worker 明细，便于快速判断 `native` / `docker` 等执行池是否失衡
+- `osctl workers --output json` 可输出带 `schema_version=v1` 的完整机器可读结果；默认 `--output table` 继续保留人类排障友好的摘要视图
+- `osctl workers --output json --summary-only` 或 `--workers-only` 可在自动化场景下裁剪输出体，只保留摘要或明细
+- `osctl workers --output table --no-capability-summary` / `--no-workers` 可分别隐藏 capability 摘要块或 worker 明细块，便于在终端里聚焦单一视图
+- `osctl workers --unschedulable-only --sort load --limit 10` 可把排障焦点收敛到不可调度 worker，并按负载/状态排序；CLI 输出的 `summary` 会对应当前实际展示的 worker 子集，worker stop / heartbeat 过期后的 offline 视图也走这条路径
+- `osctl workers --require-available-count 1 --require-capability-available-count shell=1` 可直接对 summary 里的总体/能力级可调度容量做脚本断言；如需进一步收窄，还可叠加 `--available --require-count 1 --require-status-count online=1 --require-capability-online-count shell=1 --require-load-threshold 0.50 --require-capability-count shell=1 --require-worker worker-1`，或在降级排障时使用 `--require-capability-offline-count shell=1`
 
 ### 实现位置
 

@@ -449,6 +449,14 @@ impl RuntimeService for RuntimeServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    mod env_lock {
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test_support/env_lock.rs"));
+    }
+    #[cfg(unix)]
+    mod temp_paths {
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test_support/temp_paths.rs"));
+    }
     use agentos_sandbox::docker::{DockerConfig, DockerRuntime};
     use agentos_sandbox::native::NativeRuntime;
     use agentos_sandbox::security::{AutonomyLevel, SecurityPolicy};
@@ -456,14 +464,17 @@ mod tests {
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
-    use std::sync::{Mutex, OnceLock};
 
     fn test_service() -> RuntimeServiceImpl {
-        let runtime = Arc::new(NativeRuntime::new());
-        let security = Arc::new(SecurityPolicy {
+        test_service_with_security(SecurityPolicy {
             autonomy: AutonomyLevel::Supervised,
             ..SecurityPolicy::default()
-        });
+        })
+    }
+
+    fn test_service_with_security(policy: SecurityPolicy) -> RuntimeServiceImpl {
+        let runtime = Arc::new(NativeRuntime::new());
+        let security = Arc::new(policy);
         let executor = Arc::new(ActionExecutor::new(runtime, security));
         RuntimeServiceImpl::new(executor)
     }
@@ -479,54 +490,50 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn path_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    #[cfg(unix)]
     struct ScopedPath {
-        original: std::ffi::OsString,
         temp_dir: std::path::PathBuf,
+        _path_guard: env_lock::ScopedEnvVar,
     }
 
     #[cfg(unix)]
     impl ScopedPath {
-        fn with_fake_docker(script_body: &str) -> Self {
+        fn with_fake_docker_python(program: &str) -> Self {
             let original = std::env::var_os("PATH").unwrap_or_default();
-            let temp_dir = std::env::temp_dir().join(format!(
-                "agentos-fake-docker-{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos()
-            ));
+            let temp_dir = temp_paths::unique_test_dir("fake-docker");
             fs::create_dir_all(&temp_dir).expect("create fake docker dir");
+
+            let program_path = temp_dir.join("docker.py");
+            fs::write(&program_path, program).expect("write fake docker python program");
+
             let script_path = temp_dir.join("docker");
-            fs::write(&script_path, script_body).expect("write fake docker script");
+            fs::write(
+                &script_path,
+                format!(
+                    "#!/bin/sh\nexec /usr/bin/env python3 \"{}\" \"$@\"\n",
+                    program_path.display()
+                ),
+            )
+            .expect("write fake docker wrapper");
+
             let mut perms = fs::metadata(&script_path)
-                .expect("stat fake docker script")
+                .expect("stat fake docker wrapper")
                 .permissions();
             perms.set_mode(0o755);
-            fs::set_permissions(&script_path, perms).expect("chmod fake docker script");
-            let new_path = if original.is_empty() {
-                temp_dir.as_os_str().to_owned()
-            } else {
-                let mut joined = std::ffi::OsString::new();
-                joined.push(temp_dir.as_os_str());
-                joined.push(":");
-                joined.push(&original);
-                joined
-            };
-            std::env::set_var("PATH", new_path);
-            Self { original, temp_dir }
+            fs::set_permissions(&script_path, perms).expect("chmod fake docker wrapper");
+
+            let new_path = env_lock::prepend_path(&temp_dir, &original);
+            let path_guard =
+                env_lock::ScopedEnvVar::set("PATH", &new_path).expect("PATH should be scoped");
+            Self {
+                temp_dir,
+                _path_guard: path_guard,
+            }
         }
     }
 
     #[cfg(unix)]
     impl Drop for ScopedPath {
         fn drop(&mut self) {
-            std::env::set_var("PATH", &self.original);
             let _ = fs::remove_dir_all(&self.temp_dir);
         }
     }
@@ -625,8 +632,14 @@ mod tests {
 
     #[tokio::test]
     async fn grpc_stream_output_emits_chunk_before_process_exit() {
-        let svc = test_service();
-        let payload = serde_json::json!({"command": "echo first; sleep 0.2; echo second"});
+        let command = "echo first; sleep 0.2; echo second";
+        let mut security = SecurityPolicy {
+            autonomy: AutonomyLevel::Supervised,
+            ..SecurityPolicy::default()
+        };
+        security.command_whitelist.push(command.into());
+        let svc = test_service_with_security(security);
+        let payload = serde_json::json!({"command": command});
         let req = Request::new(StreamOutputRequest {
             task_id: "t".into(),
             action_id: "action-1".into(),
@@ -674,10 +687,8 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn grpc_stream_output_docker_emits_chunk_before_process_exit() {
-        let _guard = path_lock().lock().expect("path lock");
-        let _path = ScopedPath::with_fake_docker(
-            r#"#!/usr/bin/env python3
-import sys, time
+        let _path = ScopedPath::with_fake_docker_python(
+            r#"import sys, time
 sys.stdout.write("docker-first\n")
 sys.stdout.flush()
 time.sleep(3)
@@ -695,7 +706,7 @@ sys.stdout.flush()
         let resp = svc.stream_output(req).await.expect("stream should start");
         let mut stream = resp.into_inner();
 
-        let first = tokio::time::timeout(Duration::from_secs(4), stream.next())
+        let first = tokio::time::timeout(Duration::from_secs(8), stream.next())
             .await
             .expect("expected first docker chunk before process completes")
             .expect("expected stream item")
@@ -706,6 +717,16 @@ sys.stdout.flush()
         assert!(
             text.contains("docker-first"),
             "unexpected first chunk: {text}"
+        );
+        assert!(
+            !text.contains("docker-second"),
+            "expected first chunk before process completion, got merged output: {text}"
+        );
+
+        let follow_up = tokio::time::timeout(Duration::from_millis(500), stream.next()).await;
+        assert!(
+            follow_up.is_err(),
+            "expected stream to stay open after first chunk, got immediate follow-up"
         );
     }
 

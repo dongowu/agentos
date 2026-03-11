@@ -26,8 +26,14 @@ func (r *MemoryRegistry) Register(_ context.Context, info WorkerInfo) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.workers[info.ID]; exists {
-		return errors.New("worker already registered: " + info.ID)
+	if existing, exists := r.workers[info.ID]; exists {
+		existing.Addr = info.Addr
+		existing.Capabilities = append([]string(nil), info.Capabilities...)
+		existing.MaxTasks = info.MaxTasks
+		existing.ActiveTasks = 0
+		existing.Status = StatusOnline
+		existing.LastHeartbeat = time.Now()
+		return nil
 	}
 
 	info.Status = StatusOnline
