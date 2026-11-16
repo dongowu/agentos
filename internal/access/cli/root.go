@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/dongowu/agentos/internal/access"
 	"github.com/spf13/cobra"
@@ -65,6 +66,8 @@ func newRoot(localFactory APIFactory, remoteFactory remoteAPIFactory, workerFact
 	root.PersistentFlags().StringVar(&authToken, "token", os.Getenv("AGENTOS_AUTH_TOKEN"), "Bearer token for authenticated AgentOS API servers")
 	root.AddCommand(submitCmd(resolveAPI))
 	root.AddCommand(statusCmd(resolveAPI))
+	root.AddCommand(replayCmd(resolveAPI))
+	root.AddCommand(runCmd(resolveAPI))
 	root.AddCommand(workersCmd(resolveWorkers))
 	return root
 }
@@ -109,6 +112,204 @@ func statusCmd(resolveAPI func() (access.TaskSubmissionAPI, error)) *cobra.Comma
 			return nil
 		},
 	}
+}
+
+func replayCmd(resolveAPI func() (access.TaskSubmissionAPI, error)) *cobra.Command {
+	var jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "replay [task-id]",
+		Short: "Show a task replay",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			api, err := resolveAPI()
+			if err != nil {
+				return err
+			}
+			replayAPI, err := asTaskReplayAPI(api)
+			if err != nil {
+				return err
+			}
+			replay, err := replayAPI.GetTaskReplay(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			if jsonOutput {
+				return renderTaskReplayJSON(cmd, replay)
+			}
+			return renderTaskReplay(cmd, replay)
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output the complete replay as JSON")
+	return cmd
+}
+
+func runCmd(resolveAPI func() (access.TaskSubmissionAPI, error)) *cobra.Command {
+	var timeout time.Duration
+	var pollInterval time.Duration
+	cmd := &cobra.Command{
+		Use:   "run [prompt]",
+		Short: "Run a task and wait for its replay",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if timeout <= 0 {
+				return fmt.Errorf("timeout must be > 0")
+			}
+			if pollInterval <= 0 {
+				return fmt.Errorf("poll interval must be > 0")
+			}
+			api, err := resolveAPI()
+			if err != nil {
+				return err
+			}
+			replayAPI, err := asTaskReplayAPI(api)
+			if err != nil {
+				return err
+			}
+			created, err := api.CreateTask(cmd.Context(), access.CreateTaskRequest{Prompt: args[0]})
+			if err != nil {
+				return err
+			}
+
+			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+			defer cancel()
+			state, err := waitForTaskState(ctx, api, created.TaskID, pollInterval, timeout)
+			if err != nil {
+				return err
+			}
+			replay, err := replayAPI.GetTaskReplay(cmd.Context(), created.TaskID)
+			if err != nil {
+				return fmt.Errorf("get replay for task %s: %w", created.TaskID, err)
+			}
+			if err := renderTaskReplay(cmd, replay); err != nil {
+				return err
+			}
+			if state == "failed" {
+				return fmt.Errorf("task %s failed", created.TaskID)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "Maximum time to wait for task completion")
+	cmd.Flags().DurationVar(&pollInterval, "poll-interval", 250*time.Millisecond, "Interval between task status polls")
+	return cmd
+}
+
+func asTaskReplayAPI(api access.TaskSubmissionAPI) (access.TaskReplayAPI, error) {
+	replayAPI, ok := api.(access.TaskReplayAPI)
+	if !ok {
+		return nil, fmt.Errorf("task replay is not supported by the configured API")
+	}
+	return replayAPI, nil
+}
+
+func waitForTaskState(ctx context.Context, api access.TaskSubmissionAPI, taskID string, pollInterval, timeout time.Duration) (string, error) {
+	lastState := "unknown"
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		resp, err := api.GetTask(ctx, taskID)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "", taskWaitTimeoutError(taskID, timeout, lastState)
+			}
+			return "", fmt.Errorf("get task %s: %w", taskID, err)
+		}
+		if resp != nil && resp.State != "" {
+			lastState = resp.State
+		}
+		switch lastState {
+		case "succeeded", "failed":
+			return lastState, nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", taskWaitTimeoutError(taskID, timeout, lastState)
+		case <-ticker.C:
+		}
+	}
+}
+
+func taskWaitTimeoutError(taskID string, timeout time.Duration, lastState string) error {
+	return fmt.Errorf("timed out waiting for task %s after %s (last state: %s)", taskID, timeout, lastState)
+}
+
+func renderTaskReplayJSON(cmd *cobra.Command, replay *access.TaskReplay) error {
+	if replay == nil {
+		return fmt.Errorf("replay response is empty")
+	}
+	enc := json.NewEncoder(cmd.OutOrStdout())
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	return enc.Encode(replay)
+}
+
+func renderTaskReplay(cmd *cobra.Command, replay *access.TaskReplay) error {
+	if replay == nil {
+		return fmt.Errorf("replay response is empty")
+	}
+	out := cmd.OutOrStdout()
+	if _, err := fmt.Fprintf(out, "task %s: %s\n", replay.TaskID, replay.State); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(
+		out,
+		"actions: total=%d completed=%d failed=%d\n",
+		replay.Summary.ActionCount,
+		replay.Summary.CompletedCount,
+		replay.Summary.FailedCount,
+	); err != nil {
+		return err
+	}
+	if result := strings.TrimSpace(replay.Result); result != "" {
+		if _, err := fmt.Fprintf(out, "result:\n%s\n", indentReplayText(result)); err != nil {
+			return err
+		}
+	}
+	if len(replay.Actions) == 0 {
+		return nil
+	}
+
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	if _, err := fmt.Fprintln(tw, "ACTION\tSTATUS\tRUNTIME\tWORKER\tEXIT\tCOMMAND\tSTDOUT\tSTDERR\tERROR"); err != nil {
+		return err
+	}
+	for _, action := range replay.Actions {
+		exitCode := "-"
+		if action.ExitCode != nil {
+			exitCode = strconv.Itoa(*action.ExitCode)
+		}
+		if _, err := fmt.Fprintf(
+			tw,
+			"%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			replayTableValue(action.ActionID),
+			replayTableValue(action.Status),
+			replayTableValue(action.RuntimeEnv),
+			replayTableValue(action.WorkerID),
+			exitCode,
+			replayTableValue(action.Command),
+			replayTableValue(action.Stdout),
+			replayTableValue(action.Stderr),
+			replayTableValue(action.Error),
+		); err != nil {
+			return err
+		}
+	}
+	return tw.Flush()
+}
+
+func replayTableValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return strings.NewReplacer("\n", "\\n", "\r", "\\r", "\t", "\\t").Replace(value)
+}
+
+func indentReplayText(value string) string {
+	lines := strings.Split(value, "\n")
+	for index := range lines {
+		lines[index] = "  " + lines[index]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func workersCmd(resolveWorkers func() (WorkerAPI, error)) *cobra.Command {

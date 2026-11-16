@@ -2,6 +2,9 @@
 set -Eeuo pipefail
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+LOOPBACK_NO_PROXY="127.0.0.1,localhost"
+export NO_PROXY="${NO_PROXY:+$NO_PROXY,}$LOOPBACK_NO_PROXY"
+export no_proxy="$NO_PROXY"
 
 API_ADDR=${AGENTOS_API_LISTEN_ADDR:-127.0.0.1:18080}
 CTRL_ADDR=${AGENTOS_CONTROL_ADDR:-127.0.0.1:15052}
@@ -39,7 +42,7 @@ Starts the local AgentOS stack:
   - Rust worker
 
 Options:
-  --smoke-test        Submit a sample task after startup
+  --smoke-test        Run a sample task and print its replay after startup
   --exit-after-smoke  Exit after the smoke test completes (implies --smoke-test)
   -h, --help          Show this help
 EOF
@@ -100,7 +103,7 @@ wait_for_http() {
   local delay=${3:-1}
   local attempt
   for attempt in $(seq 1 "$attempts"); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
+    if curl --noproxy '*' -fsS "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep "$delay"
@@ -121,16 +124,6 @@ wait_for_log() {
     sleep "$delay"
   done
   return 1
-}
-
-extract_task_id() {
-  local output=$1
-  sed -n 's/^task \(task-[0-9][0-9]*\) created.*/\1/p' <<<"$output"
-}
-
-json_field() {
-  local key=$1
-  sed -n "s/.*\"${key}\":\"\\([^\"]*\\)\".*/\\1/p"
 }
 
 cleanup() {
@@ -180,10 +173,11 @@ start_controller() {
 
 start_apiserver() {
   log_info "starting apiserver on $API_ADDR"
-  AGENTOS_MODE=dev \
-  AGENTOS_CONTROL_PLANE_ADDR="$CTRL_ADDR" \
-  AGENTOS_API_LISTEN_ADDR="$API_ADDR" \
-  AGENTOS_AUTH_TOKENS="$AUTH_TOKEN=$AUTH_PRINCIPAL" \
+  env -u AGENTOS_WORKER_ADDR \
+    AGENTOS_MODE=dev \
+    AGENTOS_CONTROL_PLANE_ADDR="$CTRL_ADDR" \
+    AGENTOS_API_LISTEN_ADDR="$API_ADDR" \
+    AGENTOS_AUTH_TOKENS="$AUTH_TOKEN=$AUTH_PRINCIPAL" \
   "$BIN_DIR/apiserver" >"$LOG_DIR/apiserver.log" 2>&1 &
   APISERVER_PID=$!
 
@@ -209,7 +203,7 @@ start_worker() {
   }
 }
 
-run_osctl_submit() {
+run_osctl_task() {
   : "${OSCTL_BIN:?OSCTL_BIN must be set}"
   : "${API_ADDR:?API_ADDR must be set}"
 
@@ -218,7 +212,7 @@ run_osctl_submit() {
   if [[ -n "${AUTH_TOKEN:-}" ]]; then
     cmd+=("--token" "$AUTH_TOKEN")
   fi
-  cmd+=("submit" "$prompt")
+  cmd+=("run" "$prompt" "--timeout" "30s")
   "${cmd[@]}"
 }
 
@@ -241,9 +235,9 @@ Logs:
   $LOG_DIR/worker.log
 
 Quick checks:
-  curl http://$API_ADDR/health
+  curl --noproxy '*' http://$API_ADDR/health
   AGENTOS_SERVER_URL=http://$API_ADDR AGENTOS_AUTH_TOKEN=$AUTH_TOKEN go run ./cmd/osctl workers
-  AGENTOS_SERVER_URL=http://$API_ADDR AGENTOS_AUTH_TOKEN=$AUTH_TOKEN go run ./cmd/osctl submit "echo hello"
+  AGENTOS_SERVER_URL=http://$API_ADDR AGENTOS_AUTH_TOKEN=$AUTH_TOKEN go run ./cmd/osctl run "echo hello"
 
 Press Ctrl-C to stop all processes.
 EOF
@@ -252,43 +246,9 @@ EOF
 run_smoke_test() {
   log_info "running smoke test: $SMOKE_PROMPT"
   local output
-  output=$(run_osctl_submit "$SMOKE_PROMPT" 2>&1)
+  output=$(run_osctl_task "$SMOKE_PROMPT" 2>&1)
   printf '%s\n' "$output"
-
-  local task_id
-  task_id=$(extract_task_id "$output")
-  if [[ -z "$task_id" ]]; then
-    log_error "could not parse task id from submit output"
-    return 1
-  fi
-
-  wait_for_task_state "$task_id"
-}
-
-wait_for_task_state() {
-  local task_id=$1
-  local attempt
-  for attempt in $(seq 1 120); do
-    local response
-    response=$(curl -fsS \
-      -H "Authorization: Bearer $AUTH_TOKEN" \
-      "http://$API_ADDR/v1/tasks/$task_id")
-
-    local state
-    state=$(printf '%s' "$response" | json_field state)
-    if [[ "$state" == "succeeded" ]]; then
-      log_info "smoke task succeeded: $task_id"
-      return 0
-    fi
-    if [[ "$state" == "failed" ]]; then
-      log_error "smoke task failed: $response"
-      return 1
-    fi
-    sleep 0.5
-  done
-
-  log_error "smoke task did not complete in time: $task_id"
-  return 1
+  log_info "smoke task succeeded with replay"
 }
 
 monitor_stack() {

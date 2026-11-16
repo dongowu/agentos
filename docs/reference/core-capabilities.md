@@ -7,8 +7,8 @@ This page captures the detailed capability reference that is no longer carried i
 Agents are config, not code:
 
 ```yaml
-name: defi-trading-agent
-description: "Monitors markets and executes trades."
+name: repo-ops-agent
+description: "Inspects a repository, runs checks, and writes a short report."
 model: gpt-4o
 
 memory:
@@ -16,13 +16,14 @@ memory:
   ttl: 86400
 
 tools:
-  - http.get
-  - http.post
+  - file.read
+  - file.write
+  - git.status
   - shell
 
 policy:
-  allow: ["http.*"]
-  deny: ["shell"]
+  allow: ["file.*", "git.*", "shell"]
+  deny: ["http.post"]
 
 workflow:
   - plan

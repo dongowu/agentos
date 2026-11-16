@@ -20,8 +20,10 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 type stubTaskAPI struct {
-	createResp *access.CreateTaskResponse
-	getResp    *access.CreateTaskResponse
+	createResp  *access.CreateTaskResponse
+	getResp     *access.CreateTaskResponse
+	getTaskFunc func(context.Context, string) (*access.CreateTaskResponse, error)
+	replayResp  *access.TaskReplay
 }
 
 func (s stubTaskAPI) CreateTask(_ context.Context, req access.CreateTaskRequest) (*access.CreateTaskResponse, error) {
@@ -31,11 +33,21 @@ func (s stubTaskAPI) CreateTask(_ context.Context, req access.CreateTaskRequest)
 	return &access.CreateTaskResponse{TaskID: "task-123", State: "queued"}, nil
 }
 
-func (s stubTaskAPI) GetTask(_ context.Context, taskID string) (*access.CreateTaskResponse, error) {
+func (s stubTaskAPI) GetTask(ctx context.Context, taskID string) (*access.CreateTaskResponse, error) {
+	if s.getTaskFunc != nil {
+		return s.getTaskFunc(ctx, taskID)
+	}
 	if s.getResp != nil {
 		return s.getResp, nil
 	}
 	return &access.CreateTaskResponse{TaskID: taskID, State: "running"}, nil
+}
+
+func (s stubTaskAPI) GetTaskReplay(_ context.Context, taskID string) (*access.TaskReplay, error) {
+	if s.replayResp != nil {
+		return s.replayResp, nil
+	}
+	return &access.TaskReplay{TaskID: taskID, State: "succeeded", Actions: []access.TaskReplayAction{}}, nil
 }
 
 func TestHTTPTaskAPI_CreateTask_SendsBearerToken(t *testing.T) {
@@ -95,6 +107,42 @@ func TestHTTPTaskAPI_GetTask_ReadsRemoteStatus(t *testing.T) {
 	}
 	if resp.State != "succeeded" {
 		t.Fatalf("expected succeeded, got %q", resp.State)
+	}
+}
+
+func TestHTTPTaskAPI_GetTaskReplay_ReadsRemoteReplay(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", req.Method)
+		}
+		if req.URL.String() != "http://agentos.test/v1/tasks/task-123/replay" {
+			t.Fatalf("unexpected URL: %s", req.URL.String())
+		}
+		if got := req.Header.Get("Authorization"); got != "Bearer token-123" {
+			t.Fatalf("expected bearer token, got %q", got)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body: io.NopCloser(strings.NewReader(`{
+				"task_id":"task-123",
+				"state":"succeeded",
+				"summary":{"action_count":1,"completed_count":1,"failed_count":0},
+				"actions":[{"action_id":"act-1","status":"completed","exit_code":0,"command":"echo hello","stdout":"hello\n"}]
+			}`)),
+		}, nil
+	})}
+	api := NewHTTPTaskAPI("http://agentos.test", "token-123").WithClient(client)
+
+	replay, err := api.GetTaskReplay(t.Context(), "task-123")
+	if err != nil {
+		t.Fatalf("GetTaskReplay: %v", err)
+	}
+	if replay.TaskID != "task-123" || replay.Summary.ActionCount != 1 || len(replay.Actions) != 1 {
+		t.Fatalf("unexpected replay response: %+v", replay)
+	}
+	if replay.Actions[0].Command != "echo hello" || replay.Actions[0].Stdout != "hello\n" {
+		t.Fatalf("unexpected replay action: %+v", replay.Actions[0])
 	}
 }
 
@@ -189,6 +237,185 @@ func TestRoot_RemoteMode_DoesNotInvokeLocalFactory(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "task task-999 created") {
 		t.Fatalf("expected submit output, got %q", stdout.String())
+	}
+}
+
+func TestRoot_ReplayCommand_JSON(t *testing.T) {
+	replay := &access.TaskReplay{
+		TaskID:    "task-123",
+		State:     "succeeded",
+		AgentName: "ops-agent",
+		Result:    "agent answer",
+		Summary: access.TaskReplaySummary{
+			ActionCount:    1,
+			CompletedCount: 1,
+		},
+		Actions: []access.TaskReplayAction{
+			{ActionID: "act-1", Status: "completed", RuntimeEnv: "default", WorkerID: "worker-1", ExitCode: new(int), Command: "echo hello", Stdout: "hello\n"},
+		},
+	}
+	root := newRoot(
+		func() (access.TaskSubmissionAPI, error) {
+			return stubTaskAPI{replayResp: replay}, nil
+		},
+		func(serverURL, token string) access.TaskSubmissionAPI {
+			return NewHTTPTaskAPI(serverURL, token)
+		},
+	)
+	stdout := &bytes.Buffer{}
+	root.SetOut(stdout)
+	root.SetErr(io.Discard)
+	root.SetArgs([]string{"replay", "task-123", "--json"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	assertIndentedJSONEqual(t, stdout.String(), `{
+		"task_id": "task-123",
+		"state": "succeeded",
+		"agent_name": "ops-agent",
+		"result": "agent answer",
+		"summary": {"action_count": 1, "completed_count": 1, "failed_count": 0},
+		"actions": [{"action_id": "act-1", "runtime_env": "default", "status": "completed", "command": "echo hello", "worker_id": "worker-1", "exit_code": 0, "stdout": "hello\n"}]
+	}`)
+}
+
+func TestRoot_RunCommand_WaitsForSuccessAndPrintsReplay(t *testing.T) {
+	states := []string{"queued", "running", "succeeded"}
+	getCalls := 0
+	replay := &access.TaskReplay{
+		TaskID: "task-run",
+		State:  "succeeded",
+		Result: "hello from agent",
+		Summary: access.TaskReplaySummary{
+			ActionCount:    1,
+			CompletedCount: 1,
+		},
+		Actions: []access.TaskReplayAction{
+			{ActionID: "act-1", Status: "completed", RuntimeEnv: "default", WorkerID: "worker-1", ExitCode: new(int), Command: "echo hello", Stdout: "hello\n"},
+		},
+	}
+	api := stubTaskAPI{
+		createResp: &access.CreateTaskResponse{TaskID: "task-run", State: "queued"},
+		getTaskFunc: func(_ context.Context, taskID string) (*access.CreateTaskResponse, error) {
+			state := states[getCalls]
+			getCalls++
+			return &access.CreateTaskResponse{TaskID: taskID, State: state}, nil
+		},
+		replayResp: replay,
+	}
+	root := newRoot(
+		func() (access.TaskSubmissionAPI, error) {
+			return api, nil
+		},
+		func(serverURL, token string) access.TaskSubmissionAPI {
+			return NewHTTPTaskAPI(serverURL, token)
+		},
+	)
+	stdout := &bytes.Buffer{}
+	root.SetOut(stdout)
+	root.SetErr(io.Discard)
+	root.SetArgs([]string{"run", "echo hello", "--timeout", "1s", "--poll-interval", "1ms"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if getCalls != 3 {
+		t.Fatalf("expected 3 status polls, got %d", getCalls)
+	}
+	body := stdout.String()
+	for _, want := range []string{
+		"task task-run: succeeded",
+		"actions: total=1 completed=1 failed=0",
+		"act-1",
+		"completed",
+		"default",
+		"worker-1",
+		"echo hello",
+		"hello",
+		"result:",
+		"hello from agent",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected %q in run output, got %q", want, body)
+		}
+	}
+}
+
+func TestRoot_RunCommand_FailedTaskPrintsReplayAndReturnsError(t *testing.T) {
+	exitCode := 1
+	replay := &access.TaskReplay{
+		TaskID: "task-failed",
+		State:  "failed",
+		Summary: access.TaskReplaySummary{
+			ActionCount:    1,
+			CompletedCount: 1,
+			FailedCount:    1,
+		},
+		Actions: []access.TaskReplayAction{
+			{ActionID: "act-1", Status: "failed", ExitCode: &exitCode, Command: "false", Stderr: "boom\n", Error: "command failed"},
+		},
+	}
+	api := stubTaskAPI{
+		createResp: &access.CreateTaskResponse{TaskID: "task-failed", State: "queued"},
+		getTaskFunc: func(_ context.Context, taskID string) (*access.CreateTaskResponse, error) {
+			return &access.CreateTaskResponse{TaskID: taskID, State: "failed"}, nil
+		},
+		replayResp: replay,
+	}
+	root := newRoot(
+		func() (access.TaskSubmissionAPI, error) {
+			return api, nil
+		},
+		func(serverURL, token string) access.TaskSubmissionAPI {
+			return NewHTTPTaskAPI(serverURL, token)
+		},
+	)
+	stdout := &bytes.Buffer{}
+	root.SetOut(stdout)
+	root.SetErr(io.Discard)
+	root.SetArgs([]string{"run", "false", "--timeout", "1s", "--poll-interval", "1ms"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected failed task error")
+	}
+	if !strings.Contains(err.Error(), "task task-failed failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	body := stdout.String()
+	for _, want := range []string{"task task-failed: failed", "actions: total=1 completed=1 failed=1", "failed", "boom", "command failed"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected %q in failed replay output, got %q", want, body)
+		}
+	}
+}
+
+func TestRoot_RunCommand_TimeoutIncludesLastState(t *testing.T) {
+	api := stubTaskAPI{
+		createResp: &access.CreateTaskResponse{TaskID: "task-slow", State: "queued"},
+		getTaskFunc: func(_ context.Context, taskID string) (*access.CreateTaskResponse, error) {
+			return &access.CreateTaskResponse{TaskID: taskID, State: "running"}, nil
+		},
+	}
+	root := newRoot(
+		func() (access.TaskSubmissionAPI, error) {
+			return api, nil
+		},
+		func(serverURL, token string) access.TaskSubmissionAPI {
+			return NewHTTPTaskAPI(serverURL, token)
+		},
+	)
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	root.SetArgs([]string{"run", "slow task", "--timeout", "10ms", "--poll-interval", "1ms"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out waiting for task task-slow") || !strings.Contains(err.Error(), "last state: running") {
+		t.Fatalf("unexpected timeout error: %v", err)
 	}
 }
 

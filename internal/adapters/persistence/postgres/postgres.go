@@ -84,6 +84,7 @@ func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 			tenant_id TEXT NOT NULL DEFAULT '',
 			agent_name TEXT NOT NULL DEFAULT '',
 			state TEXT NOT NULL,
+			result TEXT NOT NULL DEFAULT '',
 			plan_json JSONB,
 			created_at TIMESTAMPTZ NOT NULL,
 			updated_at TIMESTAMPTZ NOT NULL
@@ -95,6 +96,9 @@ func migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 	if _, err := pool.Exec(ctx, `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS agent_name TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS result TEXT NOT NULL DEFAULT ''`); err != nil {
 		return err
 	}
 	_, err := pool.Exec(ctx, `
@@ -134,16 +138,16 @@ func (r *TaskRepository) Create(ctx context.Context, task *taskdsl.Task) error {
 		return err
 	}
 	_, err = r.pool.Exec(ctx,
-		`INSERT INTO tasks (id, prompt, tenant_id, agent_name, state, plan_json, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		task.ID, task.Prompt, task.TenantID, task.AgentName, task.State, planJSON, task.CreatedAt, task.UpdatedAt)
+		`INSERT INTO tasks (id, prompt, tenant_id, agent_name, state, result, plan_json, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		task.ID, task.Prompt, task.TenantID, task.AgentName, task.State, task.Result, planJSON, task.CreatedAt, task.UpdatedAt)
 	return err
 }
 
 // Get implements persistence.TaskRepository.
 func (r *TaskRepository) Get(ctx context.Context, id string) (*taskdsl.Task, error) {
 	row := r.pool.QueryRow(ctx,
-		`SELECT id, prompt, tenant_id, agent_name, state, plan_json, created_at, updated_at
+		`SELECT id, prompt, tenant_id, agent_name, state, result, plan_json, created_at, updated_at
 		 FROM tasks WHERE id = $1`,
 		id,
 	)
@@ -164,15 +168,15 @@ func (r *TaskRepository) Update(ctx context.Context, task *taskdsl.Task) error {
 		return err
 	}
 	_, err = r.pool.Exec(ctx,
-		`UPDATE tasks SET prompt=$2, tenant_id=$3, agent_name=$4, state=$5, plan_json=$6, updated_at=$7 WHERE id=$1`,
-		task.ID, task.Prompt, task.TenantID, task.AgentName, task.State, planJSON, task.UpdatedAt)
+		`UPDATE tasks SET prompt=$2, tenant_id=$3, agent_name=$4, state=$5, result=$6, plan_json=$7, updated_at=$8 WHERE id=$1`,
+		task.ID, task.Prompt, task.TenantID, task.AgentName, task.State, task.Result, planJSON, task.UpdatedAt)
 	return err
 }
 
 // ListRecoverable returns queued and running tasks in creation order.
 func (r *TaskRepository) ListRecoverable(ctx context.Context) ([]*taskdsl.Task, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, prompt, tenant_id, agent_name, state, plan_json, created_at, updated_at
+		SELECT id, prompt, tenant_id, agent_name, state, result, plan_json, created_at, updated_at
 		FROM tasks
 		WHERE state IN ('queued', 'running')
 		ORDER BY created_at ASC, id ASC`)
@@ -199,7 +203,7 @@ type taskScanner interface {
 func scanTask(scanner taskScanner) (*taskdsl.Task, error) {
 	var task taskdsl.Task
 	var planJSON []byte
-	if err := scanner.Scan(&task.ID, &task.Prompt, &task.TenantID, &task.AgentName, &task.State, &planJSON, &task.CreatedAt, &task.UpdatedAt); err != nil {
+	if err := scanner.Scan(&task.ID, &task.Prompt, &task.TenantID, &task.AgentName, &task.State, &task.Result, &planJSON, &task.CreatedAt, &task.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if len(planJSON) > 0 {

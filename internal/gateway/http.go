@@ -8,7 +8,7 @@ import (
 	"github.com/dongowu/agentos/internal/tool"
 )
 
-// Handler provides ClawOS API: /agent/run, /tool/run.
+// Handler provides the compatibility agent/tool gateway: /agent/run, /tool/run.
 type Handler struct {
 	TaskAPI      access.TaskSubmissionAPI
 	AgentManager AgentLookup

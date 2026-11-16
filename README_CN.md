@@ -26,6 +26,14 @@ AgentOS 当前更适合以下团队：
 
 当前项目 **并不** 以“完整终端聊天产品”或“成熟企业控制台”作为主要定位。
 
+## 产品方向
+
+AgentOS 正在收敛到一个明确的产品切入点：**面向内部 coding / ops Agent 的可治理执行**。
+
+产品契约很简单：Agent 可以自主规划，但平台必须让每一次运行的授权、执行、结果与回放都可检查。因此首体验路径是 `osctl run` 后接 `osctl replay`，而不是只提交任务。
+
+目标用户、发布范围、成功指标与明确非目标见 [产品方向](docs/strategy/product-direction-cn.md)。在 `osctl` 作为主操作入口期间，ClawOS 材料保持概念或兼容性质。
+
 ## 为什么需要 AgentOS
 
 很多 Agent 项目擅长 prompt 和 demo，但在执行基础设施层仍然薄弱。
@@ -65,12 +73,12 @@ bash scripts/start_full_stack.sh --smoke-test --exit-after-smoke
 # Terminal 1: 启动 Rust worker
 cd runtime && cargo run -p agentos-worker
 
-# Terminal 2: 通过本地控制路径提交任务
+# Terminal 2: 运行任务并输出 replay
 export AGENTOS_MODE=dev AGENTOS_WORKER_ADDR=localhost:50051
-go run ./cmd/osctl submit "echo hello"
+go run ./cmd/osctl run "echo hello"
 ```
 
-这条路径最适合快速确认执行底座本身能跑通。
+`osctl run` 会等待任务进入终态，并展示动作、命令、退出码、捕获输出，以及可用的 runtime 与 worker 信息。独立嵌入式调用只在当前进程内保存任务状态；需要稍后复查时，请使用 `osctl run` 当次输出的 replay，或将 `osctl replay` 指向运行中的 apiserver。
 
 ### 3. 开启 LLM 规划的本地路径
 
@@ -132,6 +140,7 @@ Clients (CLI / API / SDK)
 如果你想看首页之外的细节，建议从这里继续：
 
 - [快速上手](docs/guides/getting-started-cn.md)
+- [产品方向](docs/strategy/product-direction-cn.md)
 - [核心能力参考](docs/reference/core-capabilities-cn.md)
 - [API 能力面参考](docs/reference/api-surfaces-cn.md)
 - [配置参考](docs/reference/configuration-cn.md)

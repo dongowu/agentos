@@ -25,9 +25,9 @@ var (
 func main() {
 	root := cobra.Command{
 		Use:   "claw",
-		Short: "ClawOS CLI",
+		Short: "AgentOS compatibility CLI",
 	}
-	root.PersistentFlags().StringVar(&serverURL, "server", "http://localhost:8080", "ClawOS server URL")
+	root.PersistentFlags().StringVar(&serverURL, "server", "http://localhost:8080", "AgentOS server URL")
 	root.PersistentFlags().StringVar(&authToken, "token", os.Getenv("AGENTOS_AUTH_TOKEN"), "Bearer token for authenticated AgentOS servers")
 
 	root.AddCommand(runCmd())

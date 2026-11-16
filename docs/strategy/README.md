@@ -6,10 +6,12 @@ This folder captures repository-level strategic decisions that shape the open-so
 
 - [Project README](../../README.md)
 - [Documentation Guide](../README.md)
+- [Product Direction](product-direction.md)
 - [Licensing Decision](licensing-decision.md)
 
 ## In This Folder
 
+- [Product Direction](product-direction.md) — the governed-run wedge, target user, release scope, metrics, and non-goals
 - [Licensing Decision](licensing-decision.md) — why the project is published as Apache-2.0 and how the open-core boundary is described
 
 ## Maintenance Notes

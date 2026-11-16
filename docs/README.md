@@ -8,6 +8,7 @@ If you are new to the repository, read these first:
 
 - [Project README](../README.md)
 - [Chinese README](../README_CN.md)
+- [Product Direction](strategy/product-direction.md)
 - [Getting Started Guide](guides/getting-started.md)
 - [Core Capabilities Reference](reference/core-capabilities.md)
 - [API Surfaces Reference](reference/api-surfaces.md)
@@ -71,6 +72,7 @@ These documents are useful context, but they are not the recommended first stop 
 These documents explain what belongs in the open-source core:
 
 - [Strategy Docs Index](strategy/README.md)
+- [Product Direction](strategy/product-direction.md)
 - [Licensing Decision](strategy/licensing-decision.md)
 - [Platform vs Capability Boundary](architecture/platform-vs-capability-boundary.md)
 

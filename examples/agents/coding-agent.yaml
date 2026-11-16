@@ -1,4 +1,4 @@
-# ClawOS Agent Config
+# AgentOS Agent Config
 # A coding assistant agent with file, git, and shell access.
 
 name: coding-agent
@@ -13,14 +13,14 @@ memory:
 tools:
   - file.read
   - file.write
-  - git.commit
-  - git.diff
-  - shell.exec
-  - browser.search
+  - git.clone
+  - git.status
+  - shell
+  - http.get
 
 policy:
-  allow: ["file.*", "git.*", "browser.*"]
-  deny: ["shell.rm"]
+  allow: ["file.*", "git.*", "http.*", "shell"]
+  deny: ["http.post"]
 
 workflow:
   - plan

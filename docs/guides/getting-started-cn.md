@@ -36,10 +36,12 @@ make dev-up ARGS="--smoke-test --exit-after-smoke"
 # Terminal 1: 启动 Rust worker
 cd runtime && cargo run -p agentos-worker
 
-# Terminal 2: 通过本地控制路径提交任务
+# Terminal 2: 运行任务并输出 replay
 export AGENTOS_MODE=dev AGENTOS_WORKER_ADDR=localhost:50051
-go run ./cmd/osctl submit "echo hello"
+go run ./cmd/osctl run "echo hello"
 ```
+
+`osctl run` 会提交任务、等待终态并展示 replay。独立嵌入式模式只在当前 CLI 进程内保存任务状态；需要稍后执行 `osctl status` 或 `osctl replay` 时，必须连接运行中的 apiserver 并配置 `AGENTOS_SERVER_URL`。
 
 ### 3. 开启 LLM 规划的本地路径
 
@@ -102,6 +104,7 @@ cd runtime && cargo test --workspace
 ## 下一步阅读
 
 - [核心能力参考](../reference/core-capabilities-cn.md)
+- [产品方向](../strategy/product-direction-cn.md)
 - [配置参考](../reference/configuration-cn.md)
 - [架构概览](../architecture/overview.md)
 - [多进程验收说明](../architecture/multiprocess-acceptance.md)

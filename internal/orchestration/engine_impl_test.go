@@ -18,6 +18,7 @@ import (
 	"github.com/dongowu/agentos/internal/scheduler"
 	"github.com/dongowu/agentos/internal/tool"
 	"github.com/dongowu/agentos/internal/worker"
+	"github.com/dongowu/agentos/pkg/events"
 	"github.com/dongowu/agentos/pkg/taskdsl"
 )
 
@@ -161,7 +162,8 @@ func TestEngineImpl_PolicyDenial_BlocksExecution(t *testing.T) {
 	pol := &mockPolicyEngine{
 		decision: &policy.PolicyDecision{Allowed: false, Reason: "tool denied by policy"},
 	}
-	engine := NewEngineImpl(repo, bus, planner, nil, nil, pol, nil)
+	audit := &mockAuditStore{}
+	engine := NewEngineImpl(repo, bus, planner, nil, nil, pol, nil).WithAuditStore(audit)
 	ctx := context.Background()
 
 	task, err := engine.StartTask(ctx, "echo hello")
@@ -178,6 +180,16 @@ func TestEngineImpl_PolicyDenial_BlocksExecution(t *testing.T) {
 	got, _ := repo.Get(ctx, task.ID)
 	if got.State != string(Failed) {
 		t.Errorf("expected task state failed, got %s", got.State)
+	}
+	if len(audit.records) != 1 {
+		t.Fatalf("expected one denied audit record, got %d", len(audit.records))
+	}
+	record := audit.records[0]
+	if record.TaskID != task.ID || record.ActionID == "" || record.ExitCode != -1 {
+		t.Fatalf("unexpected denied audit identity: %+v", record)
+	}
+	if !strings.Contains(record.Error, "tool denied by policy") {
+		t.Fatalf("expected denial reason in audit, got %+v", record)
 	}
 }
 
@@ -828,6 +840,252 @@ func TestEngineImpl_AgentLoop_SingleToolCall(t *testing.T) {
 	}
 	if shellTool.calls != 1 {
 		t.Errorf("expected 1 tool call, got %d", shellTool.calls)
+	}
+}
+
+func TestEngineImpl_AgentLoop_AllowedToolWritesAudit(t *testing.T) {
+	repo := persmemory.NewTaskRepository()
+	bus := msgmemory.NewEventBus()
+	planner := &StubPlanner{}
+	pol := &mockPolicyEngine{decision: &policy.PolicyDecision{Allowed: true}}
+	audit := &mockAuditStore{}
+	provider := &mockLLMProvider{
+		responses: []llm.Response{
+			{ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "shell", Arguments: `{"cmd":"echo hi"}`}}},
+			{Content: "done"},
+		},
+	}
+	shellTool := &mockTool{name: "shell", desc: "Execute commands", result: map[string]any{"stdout": "hi", "exit_code": 0}}
+
+	var completed []*events.ActionCompleted
+	unsubscribe, err := bus.Subscribe("task.action.completed", func(payload any) {
+		if event, ok := payload.(*events.ActionCompleted); ok {
+			completed = append(completed, event)
+		}
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer unsubscribe()
+
+	engine := NewEngineImpl(repo, bus, planner, nil, nil, pol, nil).
+		WithAuditStore(audit).
+		WithLLMProvider(provider, "test-model").
+		WithTools([]tool.Tool{shellTool})
+
+	task, err := engine.StartTaskWithInput(t.Context(), StartTaskInput{
+		Prompt:    "run echo hi",
+		TenantID:  "tenant-a",
+		AgentName: "ops-agent",
+	})
+	if err != nil {
+		t.Fatalf("StartTaskWithInput: %v", err)
+	}
+	if task.State != string(Succeeded) {
+		t.Fatalf("expected succeeded, got %s", task.State)
+	}
+	if shellTool.calls != 1 {
+		t.Fatalf("expected tool to run once, got %d", shellTool.calls)
+	}
+	if len(audit.records) != 1 {
+		t.Fatalf("expected 1 audit record, got %d", len(audit.records))
+	}
+
+	record := audit.records[0]
+	if record.ActionID != "loop-1-call-1" || record.Command != "echo hi" {
+		t.Fatalf("unexpected audit action identity: %+v", record)
+	}
+	if record.RuntimeEnv != agentLoopRuntimeEnv || record.TenantID != "tenant-a" || record.AgentName != "ops-agent" {
+		t.Fatalf("unexpected audit ownership: %+v", record)
+	}
+	if record.ExitCode != 0 || !strings.Contains(record.Stdout, "hi") || record.Error != "" {
+		t.Fatalf("unexpected successful audit result: %+v", record)
+	}
+	if pol.lastReq.AgentName != "ops-agent" || pol.lastReq.ToolName != "shell" || pol.lastReq.Command != "echo hi" || pol.lastReq.TenantID != "tenant-a" {
+		t.Fatalf("unexpected policy request: %+v", pol.lastReq)
+	}
+	if len(completed) != 1 || completed[0].ActionID != "loop-1-call-1" || completed[0].ExitCode != 0 {
+		t.Fatalf("unexpected completed events: %+v", completed)
+	}
+}
+
+func TestEngineImpl_AgentLoop_PolicyRejectionWritesAuditAndSkipsExecution(t *testing.T) {
+	tests := []struct {
+		name       string
+		policy     *mockPolicyEngine
+		wantReason string
+	}{
+		{
+			name:       "denied decision",
+			policy:     &mockPolicyEngine{decision: &policy.PolicyDecision{Allowed: false, Reason: "shell blocked"}},
+			wantReason: "shell blocked",
+		},
+		{
+			name:       "policy error",
+			policy:     &mockPolicyEngine{err: fmt.Errorf("policy unavailable")},
+			wantReason: "policy unavailable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := persmemory.NewTaskRepository()
+			bus := msgmemory.NewEventBus()
+			planner := &StubPlanner{}
+			audit := &mockAuditStore{}
+			provider := &mockLLMProvider{
+				responses: []llm.Response{
+					{ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "shell", Arguments: `{"cmd":"rm -rf /tmp/blocked"}`}}},
+					{Content: "recovered without running the tool"},
+				},
+			}
+			shellTool := &mockTool{name: "shell", desc: "Execute commands", result: "should not run"}
+
+			var denied []*events.ActionCompleted
+			unsubscribe, err := bus.Subscribe("task.action.denied", func(payload any) {
+				if event, ok := payload.(*events.ActionCompleted); ok {
+					denied = append(denied, event)
+				}
+			})
+			if err != nil {
+				t.Fatalf("subscribe: %v", err)
+			}
+			defer unsubscribe()
+
+			engine := NewEngineImpl(repo, bus, planner, nil, nil, tt.policy, nil).
+				WithAuditStore(audit).
+				WithLLMProvider(provider, "test-model").
+				WithTools([]tool.Tool{shellTool})
+
+			task, err := engine.StartTaskWithInput(t.Context(), StartTaskInput{
+				Prompt:    "run blocked command",
+				TenantID:  "tenant-a",
+				AgentName: "ops-agent",
+			})
+			if err != nil {
+				t.Fatalf("StartTaskWithInput: %v", err)
+			}
+			if task.State != string(Succeeded) {
+				t.Fatalf("expected task to recover, got %s", task.State)
+			}
+			if shellTool.calls != 0 {
+				t.Fatalf("expected tool not to run, got %d calls", shellTool.calls)
+			}
+			if len(audit.records) != 1 {
+				t.Fatalf("expected 1 audit record, got %d", len(audit.records))
+			}
+
+			record := audit.records[0]
+			if record.ActionID != "loop-1-call-1" || record.Command != "rm -rf /tmp/blocked" {
+				t.Fatalf("unexpected audit action identity: %+v", record)
+			}
+			if record.ExitCode != -1 || !strings.Contains(record.Error, tt.wantReason) {
+				t.Fatalf("unexpected rejected audit result: %+v", record)
+			}
+			if record.RuntimeEnv != agentLoopRuntimeEnv || record.TenantID != "tenant-a" || record.AgentName != "ops-agent" {
+				t.Fatalf("unexpected audit ownership: %+v", record)
+			}
+			if len(denied) != 1 || denied[0].ExitCode != -1 || !strings.Contains(denied[0].Error, tt.wantReason) {
+				t.Fatalf("unexpected denied events: %+v", denied)
+			}
+
+			lastMessage := provider.requests[1].Messages[len(provider.requests[1].Messages)-1]
+			if lastMessage.Role != "tool" || !strings.Contains(lastMessage.Content, tt.wantReason) {
+				t.Fatalf("expected explicit tool error, got %+v", lastMessage)
+			}
+		})
+	}
+}
+
+func TestEngineImpl_AgentLoop_ToolFailuresWriteAudit(t *testing.T) {
+	tests := []struct {
+		name      string
+		call      llm.ToolCall
+		tools     []tool.Tool
+		mock      *mockTool
+		wantError string
+		wantCmd   string
+		wantCalls int
+	}{
+		{
+			name:      "unknown tool",
+			call:      llm.ToolCall{ID: "call-1", Name: "missing", Arguments: `{"cmd":"missing cmd"}`},
+			wantError: "not found",
+			wantCmd:   "missing cmd",
+		},
+		{
+			name:      "invalid arguments",
+			call:      llm.ToolCall{ID: "call-1", Name: "shell", Arguments: `{invalid`},
+			tools:     []tool.Tool{&mockTool{name: "shell", desc: "Execute commands"}},
+			wantError: "invalid arguments",
+		},
+		{
+			name:      "execution error",
+			call:      llm.ToolCall{ID: "call-1", Name: "shell", Arguments: `{"cmd":"false"}`},
+			tools:     []tool.Tool{&mockTool{name: "shell", desc: "Execute commands", err: fmt.Errorf("command failed")}},
+			mock:      nil,
+			wantError: "command failed",
+			wantCmd:   "false",
+			wantCalls: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if len(tt.tools) > 0 {
+				tt.mock, _ = tt.tools[0].(*mockTool)
+			}
+			repo := persmemory.NewTaskRepository()
+			bus := msgmemory.NewEventBus()
+			planner := &StubPlanner{}
+			audit := &mockAuditStore{}
+			provider := &mockLLMProvider{
+				responses: []llm.Response{
+					{ToolCalls: []llm.ToolCall{tt.call}},
+					{Content: "recovered after tool failure"},
+				},
+			}
+
+			var completed []*events.ActionCompleted
+			unsubscribe, err := bus.Subscribe("task.action.completed", func(payload any) {
+				if event, ok := payload.(*events.ActionCompleted); ok {
+					completed = append(completed, event)
+				}
+			})
+			if err != nil {
+				t.Fatalf("subscribe: %v", err)
+			}
+			defer unsubscribe()
+
+			engine := NewEngineImpl(repo, bus, planner, nil, nil, nil, nil).
+				WithAuditStore(audit).
+				WithLLMProvider(provider, "test-model").
+				WithTools(tt.tools)
+
+			task, err := engine.StartTaskWithInput(t.Context(), StartTaskInput{Prompt: "exercise tool failure", TenantID: "tenant-a", AgentName: "ops-agent"})
+			if err != nil {
+				t.Fatalf("StartTaskWithInput: %v", err)
+			}
+			if task.State != string(Succeeded) {
+				t.Fatalf("expected task to recover, got %s", task.State)
+			}
+			if tt.mock != nil && tt.mock.calls != tt.wantCalls {
+				t.Fatalf("expected %d tool calls, got %d", tt.wantCalls, tt.mock.calls)
+			}
+			if len(audit.records) != 1 {
+				t.Fatalf("expected 1 audit record, got %d", len(audit.records))
+			}
+			record := audit.records[0]
+			if record.ActionID != "loop-1-call-1" || record.Command != tt.wantCmd || record.ExitCode != -1 || !strings.Contains(record.Error, tt.wantError) {
+				t.Fatalf("unexpected failed audit result: %+v", record)
+			}
+			if record.RuntimeEnv != agentLoopRuntimeEnv || record.TenantID != "tenant-a" || record.AgentName != "ops-agent" {
+				t.Fatalf("unexpected audit ownership: %+v", record)
+			}
+			if len(completed) != 1 || completed[0].ExitCode != -1 || !strings.Contains(completed[0].Error, tt.wantError) {
+				t.Fatalf("unexpected completed events: %+v", completed)
+			}
+		})
 	}
 }
 

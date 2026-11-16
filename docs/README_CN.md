@@ -8,6 +8,7 @@
 
 - [项目 README](../README.md)
 - [中文 README](../README_CN.md)
+- [产品方向](strategy/product-direction-cn.md)
 - [快速上手](guides/getting-started-cn.md)
 - [核心能力参考](reference/core-capabilities-cn.md)
 - [API 能力面参考](reference/api-surfaces-cn.md)

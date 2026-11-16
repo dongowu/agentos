@@ -7,8 +7,8 @@
 Agent 是配置，不是代码：
 
 ```yaml
-name: defi-trading-agent
-description: "监控市场并执行交易"
+name: repo-ops-agent
+description: "检查仓库、运行校验并写入简短报告"
 model: gpt-4o
 
 memory:
@@ -16,13 +16,14 @@ memory:
   ttl: 86400
 
 tools:
-  - http.get
-  - http.post
+  - file.read
+  - file.write
+  - git.status
   - shell
 
 policy:
-  allow: ["http.*"]
-  deny: ["shell"]
+  allow: ["file.*", "git.*", "shell"]
+  deny: ["http.post"]
 
 workflow:
   - plan

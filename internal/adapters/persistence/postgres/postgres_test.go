@@ -26,6 +26,7 @@ func TestTaskRepository_RoundTripTenantID(t *testing.T) {
 		Prompt:    "echo hello",
 		TenantID:  "tenant-pg",
 		State:     "queued",
+		Result:    "result-pg",
 		CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
 		UpdatedAt: time.Unix(1_700_000_001, 0).UTC(),
 	}
@@ -41,6 +42,9 @@ func TestTaskRepository_RoundTripTenantID(t *testing.T) {
 	}
 	if got.TenantID != "tenant-pg" {
 		t.Fatalf("expected tenant-pg, got %q", got.TenantID)
+	}
+	if got.Result != "result-pg" {
+		t.Fatalf("expected result-pg, got %q", got.Result)
 	}
 }
 

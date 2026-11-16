@@ -170,6 +170,7 @@ Success response shape:
   "tenant_id": "tenant-a",
   "agent_name": "ops-agent",
   "prompt": "fix deployment",
+  "result": "deployment fixed",
   "summary": {
     "action_count": 2,
     "completed_count": 2,
@@ -288,6 +289,25 @@ Notes:
 ## CLI machine-readable schemas
 
 The repo also exposes stable machine-readable CLI diagnostics for local operators and automation.
+
+### `osctl run` and `osctl replay`
+
+`osctl run <prompt>` is the primary governed-run path. It submits the task, polls `GET /v1/tasks/{task_id}` until `succeeded` or `failed`, then renders the replay returned by `GET /v1/tasks/{task_id}/replay`.
+
+```bash
+osctl run "echo hello" --timeout 30s --poll-interval 250ms
+osctl replay <task-id>
+osctl replay <task-id> --json
+```
+
+Notes:
+
+- `run` requires the configured API to support the replay contract
+- `--timeout` must be greater than zero; timeout errors include the last observed task state
+- a failed task still renders its replay before `run` exits non-zero
+- `replay --json` emits the complete `TaskReplay` object with indented JSON and no HTML escaping
+- local embedded mode exposes `access.TaskReplayAPI` to the same process; separate CLI invocations do not share in-memory task state
+- remote mode uses the HTTP client implementation, so `osctl replay` can inspect persisted tasks through a running apiserver
 
 ### `claw dev --output json`
 
