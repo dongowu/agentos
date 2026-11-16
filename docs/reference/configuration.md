@@ -89,7 +89,7 @@ These variables are read by `pkg/config` and `internal/bootstrap`.
 | Variable | Purpose | Default / Behavior |
 |----------|---------|--------------------|
 | `AGENTOS_MODE` | choose bootstrap baseline | unset = production baseline, `dev` = development baseline |
-| `AGENTOS_WORKER_ADDR` | direct Rust worker gRPC address | prod default `localhost:50051`; in dev it seeds local worker path |
+| `AGENTOS_WORKER_ADDR` | direct Rust worker gRPC address; enables the in-process direct executor | prod default `localhost:50051`; in dev it seeds local worker path |
 | `AGENTOS_CONTROL_PLANE_ADDR` | shared controller registry address | unset by default |
 | `AGENTOS_SCHEDULER_MODE` | scheduler mode override | baseline decides `nats` or `local` |
 | `AGENTOS_SCHEDULER_HEARTBEAT_TIMEOUT` | stale-worker timeout used by the controller health monitor | baseline default `30s` |
@@ -226,6 +226,8 @@ export AGENTOS_API_LISTEN_ADDR=127.0.0.1:18080
 export GRPC_LISTEN_ADDR=127.0.0.1:15052
 export AGENTOS_CONTROL_PLANE_ADDR=127.0.0.1:15052
 ```
+
+For full-stack validation, do not give the apiserver `AGENTOS_WORKER_ADDR`; dispatch should use the controller registry and worker pool. `scripts/start_full_stack.sh` explicitly removes it when starting the apiserver.
 
 ### Docker-backed worker
 

@@ -26,6 +26,14 @@ AgentOS is best suited for:
 
 AgentOS is **not** currently positioned as a polished end-user chat product or a complete enterprise console.
 
+## Product Direction
+
+AgentOS is narrowing around one product wedge: **governed execution for internal coding and operations agents**.
+
+The contract is simple: an agent may plan autonomously, but the platform must make each run's authorization, execution, result, and replay inspectable. The primary first-run path is therefore `osctl run` followed by `osctl replay`, not a bare task submission.
+
+See [Product Direction](docs/strategy/product-direction.md) for the target user, release scope, success metrics, and explicit non-goals. ClawOS material remains conceptual or compatibility-oriented while `osctl` is the primary operator interface.
+
 ## Why AgentOS
 
 Most agent projects are good at prompts and demos, but weak at execution infrastructure.
@@ -65,12 +73,12 @@ bash scripts/start_full_stack.sh --smoke-test --exit-after-smoke
 # Terminal 1: start the Rust worker
 cd runtime && cargo run -p agentos-worker
 
-# Terminal 2: submit a task through the local control path
+# Terminal 2: run a task and print its replay
 export AGENTOS_MODE=dev AGENTOS_WORKER_ADDR=localhost:50051
-go run ./cmd/osctl submit "echo hello"
+go run ./cmd/osctl run "echo hello"
 ```
 
-This is the fastest way to verify the execution substrate locally.
+`osctl run` waits for a terminal state and prints a replay with actions, commands, exit codes, captured output, runtime, and worker when available. A standalone embedded invocation keeps task state in-process; use the replay printed by `osctl run`, or point `osctl replay` at a running apiserver when you need to inspect a task later.
 
 ### 3. Local run with LLM planning
 
@@ -132,6 +140,7 @@ At a high level:
 If you want details beyond the homepage, start here:
 
 - [Getting Started Guide](docs/guides/getting-started.md)
+- [Product Direction](docs/strategy/product-direction.md)
 - [Core Capabilities Reference](docs/reference/core-capabilities.md)
 - [API Surfaces Reference](docs/reference/api-surfaces.md)
 - [Configuration Reference](docs/reference/configuration.md)

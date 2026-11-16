@@ -89,7 +89,7 @@
 | 变量 | 用途 | 默认值 / 行为 |
 |------|------|---------------|
 | `AGENTOS_MODE` | 选择启动基线 | 未设置 = 生产基线，`dev` = 开发基线 |
-| `AGENTOS_WORKER_ADDR` | 直连 Rust worker 的 gRPC 地址 | 生产默认 `localhost:50051`；开发模式下用于本地 worker 路径 |
+| `AGENTOS_WORKER_ADDR` | 直连 Rust worker 的 gRPC 地址；会启用进程内 direct executor | 生产默认 `localhost:50051`；开发模式下用于本地 worker 路径 |
 | `AGENTOS_CONTROL_PLANE_ADDR` | 共享 controller 注册中心地址 | 默认未设置 |
 | `AGENTOS_SCHEDULER_MODE` | 覆盖 scheduler 模式 | 基线默认决定 `nats` 或 `local` |
 | `AGENTOS_SCHEDULER_HEARTBEAT_TIMEOUT` | controller 健康监控判定 worker 过期的超时时间 | 基线默认 `30s` |
@@ -226,6 +226,8 @@ export AGENTOS_API_LISTEN_ADDR=127.0.0.1:18080
 export GRPC_LISTEN_ADDR=127.0.0.1:15052
 export AGENTOS_CONTROL_PLANE_ADDR=127.0.0.1:15052
 ```
+
+完整栈验证时不要让 apiserver 读取 `AGENTOS_WORKER_ADDR`；调度应经过 controller registry 与 worker pool。`scripts/start_full_stack.sh` 启动 apiserver 时会显式移除该变量。
 
 ### Docker-backed worker
 

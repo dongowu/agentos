@@ -55,6 +55,7 @@ type TaskReplay struct {
 	TenantID  string             `json:"tenant_id,omitempty"`
 	AgentName string             `json:"agent_name,omitempty"`
 	Prompt    string             `json:"prompt,omitempty"`
+	Result    string             `json:"result,omitempty"`
 	Summary   TaskReplaySummary  `json:"summary"`
 	Actions   []TaskReplayAction `json:"actions"`
 }

@@ -459,16 +459,39 @@ func (e *EngineImpl) prepareAction(ctx context.Context, task *taskdsl.Task, acti
 		TenantID:  task.TenantID,
 	})
 	if err != nil {
-		_ = e.bus.Publish(ctx, "task.action.denied", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Occurred: time.Now()})
+		reason := fmt.Sprintf("policy error: %v", err)
+		e.recordPolicyDenial(ctx, task, action, reason)
 		_ = e.transition(ctx, task, Failed)
-		return fmt.Errorf("policy error: %w", err)
+		return errors.New(reason)
 	}
-	if !decision.Allowed {
-		_ = e.bus.Publish(ctx, "task.action.denied", &events.ActionCompleted{TaskID: task.ID, ActionID: action.ID, ExitCode: -1, Occurred: time.Now()})
+	if decision == nil || !decision.Allowed {
+		reason := "policy denied"
+		if decision != nil && decision.Reason != "" {
+			reason += ": " + decision.Reason
+		}
+		e.recordPolicyDenial(ctx, task, action, reason)
 		_ = e.transition(ctx, task, Failed)
-		return fmt.Errorf("policy denied: %s", decision.Reason)
+		return errors.New(reason)
 	}
 	return nil
+}
+
+func (e *EngineImpl) recordPolicyDenial(ctx context.Context, task *taskdsl.Task, action *taskdsl.Action, reason string) {
+	if e.bus != nil {
+		_ = e.bus.Publish(ctx, "task.action.denied", &events.ActionCompleted{
+			TaskID:   task.ID,
+			ActionID: action.ID,
+			ExitCode: -1,
+			Error:    reason,
+			Occurred: time.Now(),
+		})
+	}
+	e.appendAudit(ctx, task, action, &scheduler.ActionResult{
+		TaskID:   task.ID,
+		ActionID: action.ID,
+		ExitCode: -1,
+		Error:    errors.New(reason),
+	}, reason)
 }
 
 func (e *EngineImpl) publishActionDispatched(ctx context.Context, taskID, actionID string) {
@@ -612,7 +635,10 @@ func extractCommand(action *taskdsl.Action) string {
 	return ""
 }
 
-const maxAgentLoopIterations = 10
+const (
+	agentLoopRuntimeEnv    = "agent-loop"
+	maxAgentLoopIterations = 10
+)
 
 const agentSystemPrompt = `You are an AI agent running on AgentOS. You have access to tools that you can call to accomplish tasks.
 
@@ -694,50 +720,12 @@ func (e *EngineImpl) runAgentLoop(ctx context.Context, task *taskdsl.Task) (*tas
 
 		// Execute each tool call and collect results.
 		for _, tc := range resp.ToolCalls {
-			actionID := fmt.Sprintf("loop-%d-%s", i+1, tc.ID)
-
-			_ = e.bus.Publish(ctx, "task.action.dispatched", &events.ActionDispatched{
-				TaskID:   task.ID,
-				ActionID: actionID,
-				Occurred: time.Now(),
-			})
-
-			t, ok := toolMap[tc.Name]
-			if !ok {
-				messages = append(messages, llm.Message{
-					Role:       "tool",
-					ToolCallID: tc.ID,
-					Content:    fmt.Sprintf("error: tool %q not found", tc.Name),
-				})
-				continue
+			action := &taskdsl.Action{
+				ID:         fmt.Sprintf("loop-%d-%s", i+1, tc.ID),
+				Kind:       tc.Name,
+				RuntimeEnv: agentLoopRuntimeEnv,
 			}
-
-			var args map[string]any
-			if err := json.Unmarshal([]byte(tc.Arguments), &args); err != nil {
-				messages = append(messages, llm.Message{
-					Role:       "tool",
-					ToolCallID: tc.ID,
-					Content:    fmt.Sprintf("error: invalid arguments: %v", err),
-				})
-				continue
-			}
-
-			result, err := t.Run(ctx, args)
-			var resultStr string
-			if err != nil {
-				resultStr = fmt.Sprintf("error: %v", err)
-			} else {
-				resultBytes, _ := json.Marshal(result)
-				resultStr = string(resultBytes)
-			}
-
-			_ = e.bus.Publish(ctx, "task.action.completed", &events.ActionCompleted{
-				TaskID:   task.ID,
-				ActionID: actionID,
-				ExitCode: 0,
-				Stdout:   resultStr,
-				Occurred: time.Now(),
-			})
+			resultStr := e.executeAgentToolCall(ctx, task, action, toolMap[tc.Name], tc.Arguments)
 
 			messages = append(messages, llm.Message{
 				Role:       "tool",
@@ -753,4 +741,80 @@ func (e *EngineImpl) runAgentLoop(ctx context.Context, task *taskdsl.Task) (*tas
 	_ = e.repo.Update(ctx, task)
 	_ = e.transition(ctx, task, Failed)
 	return e.repo.Get(ctx, task.ID)
+}
+
+func (e *EngineImpl) executeAgentToolCall(ctx context.Context, task *taskdsl.Task, action *taskdsl.Action, availableTool tool.Tool, rawArgs string) string {
+	e.publishActionDispatched(ctx, task.ID, action.ID)
+
+	var args map[string]any
+	if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
+		return e.rejectAgentToolCall(ctx, task, action, "task.action.completed", fmt.Sprintf("invalid arguments: %v", err))
+	}
+	action.Payload = args
+
+	if availableTool == nil {
+		return e.rejectAgentToolCall(ctx, task, action, "task.action.completed", fmt.Sprintf("tool %q not found", action.Kind))
+	}
+
+	if e.policy != nil {
+		decision, err := e.policy.Evaluate(ctx, policy.PolicyRequest{
+			AgentName: task.AgentName,
+			ToolName:  action.Kind,
+			Command:   extractCommand(action),
+			TenantID:  task.TenantID,
+		})
+		if err != nil {
+			return e.rejectAgentToolCall(ctx, task, action, "task.action.denied", fmt.Sprintf("policy error: %v", err))
+		}
+		if decision == nil || !decision.Allowed {
+			reason := "policy denied"
+			if decision != nil && decision.Reason != "" {
+				reason += ": " + decision.Reason
+			}
+			return e.rejectAgentToolCall(ctx, task, action, "task.action.denied", reason)
+		}
+	}
+
+	result, err := availableTool.Run(ctx, args)
+	if err != nil {
+		return e.rejectAgentToolCall(ctx, task, action, "task.action.completed", fmt.Sprintf("tool execution failed: %v", err))
+	}
+	resultBytes, err := json.Marshal(result)
+	if err != nil {
+		return e.rejectAgentToolCall(ctx, task, action, "task.action.completed", fmt.Sprintf("encode tool result: %v", err))
+	}
+	resultStr := string(resultBytes)
+	e.recordAgentToolCallResult(ctx, task, action, "task.action.completed", 0, resultStr, "", "")
+	return resultStr
+}
+
+func (e *EngineImpl) rejectAgentToolCall(ctx context.Context, task *taskdsl.Task, action *taskdsl.Action, topic, reason string) string {
+	e.recordAgentToolCallResult(ctx, task, action, topic, -1, "", reason, reason)
+	return "error: " + reason
+}
+
+func (e *EngineImpl) recordAgentToolCallResult(ctx context.Context, task *taskdsl.Task, action *taskdsl.Action, topic string, exitCode int, stdout, stderr, errorText string) {
+	if e.bus != nil {
+		_ = e.bus.Publish(ctx, topic, &events.ActionCompleted{
+			TaskID:   task.ID,
+			ActionID: action.ID,
+			ExitCode: exitCode,
+			Stdout:   stdout,
+			Stderr:   stderr,
+			Error:    errorText,
+			Occurred: time.Now(),
+		})
+	}
+	var resultErr error
+	if errorText != "" {
+		resultErr = errors.New(errorText)
+	}
+	e.appendAudit(ctx, task, action, &scheduler.ActionResult{
+		TaskID:   task.ID,
+		ActionID: action.ID,
+		ExitCode: exitCode,
+		Stdout:   []byte(stdout),
+		Stderr:   []byte(stderr),
+		Error:    resultErr,
+	}, errorText)
 }

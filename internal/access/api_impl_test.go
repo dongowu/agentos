@@ -105,6 +105,7 @@ func TestTaskSubmissionAPIImpl_GetTaskReplay_JoinsPlanAndAudit(t *testing.T) {
 		TenantID:  "tenant-1",
 		AgentName: "ops-agent",
 		State:     "succeeded",
+		Result:    "deployment fixed",
 		Plan: &taskdsl.Plan{Actions: []taskdsl.Action{
 			{ID: "act-1", Kind: "command.exec", RuntimeEnv: "default", Payload: map[string]any{"cmd": "echo hello"}},
 			{ID: "act-2", Kind: "command.exec", RuntimeEnv: "docker", Payload: map[string]any{"cmd": "false"}},
@@ -144,6 +145,9 @@ func TestTaskSubmissionAPIImpl_GetTaskReplay_JoinsPlanAndAudit(t *testing.T) {
 	}
 	if replay.AgentName != "ops-agent" {
 		t.Fatalf("expected ops-agent, got %q", replay.AgentName)
+	}
+	if replay.Result != "deployment fixed" {
+		t.Fatalf("expected final result in replay, got %q", replay.Result)
 	}
 	if replay.Summary.ActionCount != 2 {
 		t.Fatalf("expected 2 actions, got %d", replay.Summary.ActionCount)

@@ -2,6 +2,9 @@
 set -Eeuo pipefail
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+LOOPBACK_NO_PROXY="127.0.0.1,localhost"
+export NO_PROXY="${NO_PROXY:+$NO_PROXY,}$LOOPBACK_NO_PROXY"
+export no_proxy="$NO_PROXY"
 TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/agentos-acceptance.XXXXXX")
 BIN_DIR="$TMP_DIR/bin"
 LOG_DIR="$TMP_DIR/logs"
@@ -30,6 +33,7 @@ HEARTBEAT_TIMEOUT=${AGENTOS_ACCEPTANCE_HEARTBEAT_TIMEOUT:-3s}
 HEALTH_CHECK_INTERVAL=${AGENTOS_ACCEPTANCE_HEALTH_CHECK_INTERVAL:-250ms}
 DEGRADE_ATTEMPTS=${AGENTOS_ACCEPTANCE_DEGRADE_ATTEMPTS:-40}
 DEGRADE_DELAY=${AGENTOS_ACCEPTANCE_DEGRADE_DELAY:-0.25}
+CURL=(curl --noproxy '*')
 
 CONTROLLER_PID=""
 APISERVER_PID=""
@@ -73,7 +77,7 @@ wait_for_http() {
   local delay=${3:-0.5}
   local attempt
   for attempt in $(seq 1 "$attempts"); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
+    if "${CURL[@]}" -fsS "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep "$delay"
@@ -149,7 +153,7 @@ stop_worker() {
 
 submit_task() {
   local prompt=$1
-  curl -fsS -X POST "http://$API_ADDR/v1/tasks" \
+  "${CURL[@]}" -fsS -X POST "http://$API_ADDR/v1/tasks" \
     -H "Authorization: Bearer $AUTH_TOKEN" \
     -H 'Content-Type: application/json' \
     -d "$(json_prompt_payload "$prompt")"
@@ -161,7 +165,7 @@ wait_for_task_state() {
   local final_state=""
   local task_response=""
   for _ in $(seq 1 120); do
-    task_response=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$task_id")
+    task_response=$("${CURL[@]}" -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$task_id")
     final_state=$(printf '%s' "$task_response" | json_field state)
     if [[ "$final_state" == "succeeded" ]]; then
       printf '%s\n' "$task_response"
@@ -296,8 +300,15 @@ if [[ "$FINAL_STATE" != "succeeded" ]]; then
   exit 1
 fi
 
+echo "[acceptance] verifying osctl replay --json"
+TASK_REPLAY=$(run_osctl_replay "$TASK_ID")
+if ! printf '%s' "$TASK_REPLAY" | python3 -c 'import json,sys; data=json.load(sys.stdin); actions=data.get("actions") or []; expected=int(sys.argv[1]); assert data.get("state") == "succeeded", data.get("state"); assert int((data.get("summary") or {}).get("action_count", 0)) >= expected, data.get("summary"); assert len(actions) >= expected, len(actions); assert any("acceptance-one" in (action.get("stdout") or "") for action in actions), [action.get("stdout") for action in actions]' "$EXPECTED_ACTIONS"; then
+  echo "unexpected replay payload for task $TASK_ID: $TASK_REPLAY"
+  exit 1
+fi
+
 echo "[acceptance] verifying task audit API"
-TASK_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$TASK_ID/audit")
+TASK_AUDIT=$("${CURL[@]}" -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$TASK_ID/audit")
 ACTION_COUNT=$(printf '%s' "$TASK_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; print(len(records))')
 if [[ "$ACTION_COUNT" -lt "$EXPECTED_ACTIONS" ]]; then
   echo "expected at least $EXPECTED_ACTIONS audit records, got $ACTION_COUNT: $TASK_AUDIT"
@@ -310,7 +321,7 @@ if [[ -z "$ACTION_ID" ]]; then
 fi
 
 echo "[acceptance] verifying action audit API for action_id=$ACTION_ID"
-ACTION_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$TASK_ID/actions/$ACTION_ID/audit")
+ACTION_AUDIT=$("${CURL[@]}" -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$TASK_ID/actions/$ACTION_ID/audit")
 ACTION_EXIT=$(printf '%s' "$ACTION_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get("exit_code", ""))')
 if [[ "$ACTION_EXIT" != "0" ]]; then
   echo "unexpected action audit exit code: $ACTION_AUDIT"
@@ -318,7 +329,7 @@ if [[ "$ACTION_EXIT" != "0" ]]; then
 fi
 
 echo "[acceptance] verifying global audit API"
-GLOBAL_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/audit?failed=false&limit=20")
+GLOBAL_AUDIT=$("${CURL[@]}" -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/audit?failed=false&limit=20")
 GLOBAL_MATCHES=$(printf '%s' "$GLOBAL_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; task_id=sys.argv[1]; print(sum(1 for r in records if r.get("task_id") == task_id and r.get("tenant_id") == "tenant-acceptance"))' "$TASK_ID")
 if [[ "$GLOBAL_MATCHES" -lt 1 ]]; then
   echo "expected global audit feed to include accepted tenant record for task $TASK_ID: $GLOBAL_AUDIT"
@@ -391,7 +402,7 @@ if [[ "$RESTART_FINAL_STATE" != "succeeded" ]]; then
   exit 1
 fi
 
-RESTART_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$RESTART_TASK_ID/audit")
+RESTART_AUDIT=$("${CURL[@]}" -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$RESTART_TASK_ID/audit")
 RESTART_ACTION_COUNT=$(printf '%s' "$RESTART_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; print(len(records))')
 if [[ "$RESTART_ACTION_COUNT" -lt "$RESTART_EXPECTED_ACTIONS" ]]; then
   echo "expected at least $RESTART_EXPECTED_ACTIONS restart audit records, got $RESTART_ACTION_COUNT: $RESTART_AUDIT"
@@ -433,7 +444,7 @@ if [[ "$BRIDGE_FILE_CONTENT" != "$BRIDGE_CONTENT" ]]; then
   exit 1
 fi
 
-BRIDGE_AUDIT=$(curl -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$BRIDGE_TASK_ID/audit")
+BRIDGE_AUDIT=$("${CURL[@]}" -fsS -H "Authorization: Bearer $AUTH_TOKEN" "http://$API_ADDR/v1/tasks/$BRIDGE_TASK_ID/audit")
 BRIDGE_LAST_WORKER=$(printf '%s' "$BRIDGE_AUDIT" | python3 -c 'import json,sys; data=json.load(sys.stdin); records=data.get("records") or []; assert records, "no bridge audit records returned"; print(records[-1].get("worker_id", ""))')
 if [[ "$BRIDGE_LAST_WORKER" != "control-plane" ]]; then
   echo "expected bridge audit worker_id control-plane, got $BRIDGE_LAST_WORKER: $BRIDGE_AUDIT"

@@ -1,5 +1,5 @@
-# ClawOS Agent Config
-# Agent is config, not code.
+# Concept-only configuration; not a supported AgentOS product example.
+# The tools below are not part of the current built-in tool registry.
 
 name: trading-agent
 

@@ -87,6 +87,7 @@ func (a *TaskSubmissionAPIImpl) GetTaskReplay(ctx context.Context, taskID string
 		TenantID:  task.TenantID,
 		AgentName: task.AgentName,
 		Prompt:    task.Prompt,
+		Result:    task.Result,
 		Actions:   []TaskReplayAction{},
 	}
 

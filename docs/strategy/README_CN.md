@@ -6,10 +6,12 @@
 
 - [项目 README](../../README.md)
 - [文档导航](../README_CN.md)
+- [产品方向](product-direction-cn.md)
 - [许可证决策](licensing-decision.md)
 
 ## 本目录内容
 
+- [产品方向](product-direction-cn.md) — governed-run 切入点、目标用户、发布范围、指标与非目标
 - [许可证决策](licensing-decision.md) — 为什么项目采用 Apache-2.0，以及 open-core 边界如何表述
 
 ## 维护说明

@@ -24,6 +24,18 @@ run_osctl_workers() {
   "${cmd[@]}"
 }
 
+run_osctl_replay() {
+  : "${OSCTL_BIN:?OSCTL_BIN must be set}"
+  : "${API_ADDR:?API_ADDR must be set}"
+
+  local -a cmd=("$OSCTL_BIN" "--server" "http://$API_ADDR")
+  if [[ -n "${AUTH_TOKEN:-}" ]]; then
+    cmd+=("--token" "$AUTH_TOKEN")
+  fi
+  cmd+=("replay" "$1" "--json")
+  "${cmd[@]}"
+}
+
 wait_for_claw_dev() {
   local attempts=$1
   local delay=$2

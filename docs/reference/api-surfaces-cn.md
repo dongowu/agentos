@@ -170,6 +170,7 @@ Authorization: Bearer <token>
   "tenant_id": "tenant-a",
   "agent_name": "ops-agent",
   "prompt": "fix deployment",
+  "result": "deployment fixed",
   "summary": {
     "action_count": 2,
     "completed_count": 2,
@@ -288,6 +289,25 @@ Authorization: Bearer <token>
 ## CLI 机器可读 schema
 
 仓库也对本地运维和自动化场景提供了稳定的机器可读 CLI 诊断输出。
+
+### `osctl run` 与 `osctl replay`
+
+`osctl run <prompt>` 是主 governed-run 路径。它会提交任务，轮询 `GET /v1/tasks/{task_id}` 直到 `succeeded` 或 `failed`，然后渲染 `GET /v1/tasks/{task_id}/replay` 返回的 replay。
+
+```bash
+osctl run "echo hello" --timeout 30s --poll-interval 250ms
+osctl replay <task-id>
+osctl replay <task-id> --json
+```
+
+说明：
+
+- `run` 要求所配置的 API 支持 replay 契约
+- `--timeout` 必须大于零；超时错误会包含最后观察到的任务状态
+- failed 任务仍会先渲染 replay，再由 `run` 返回非零退出码
+- `replay --json` 输出完整 `TaskReplay` 对象，使用缩进 JSON 且不转义 HTML
+- 本地嵌入模式只在同一进程内暴露 `access.TaskReplayAPI`；不同 CLI 调用不共享内存任务状态
+- 远程模式通过 HTTP client 实现，因此 `osctl replay` 可以通过运行中的 apiserver 检查已持久化任务
 
 ### `claw dev --output json`
 

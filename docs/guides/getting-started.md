@@ -36,10 +36,12 @@ Use this when you want to prove the local execution path works before turning on
 # Terminal 1: start the Rust worker
 cd runtime && cargo run -p agentos-worker
 
-# Terminal 2: submit a task through the local control path
+# Terminal 2: run a task and print its replay
 export AGENTOS_MODE=dev AGENTOS_WORKER_ADDR=localhost:50051
-go run ./cmd/osctl submit "echo hello"
+go run ./cmd/osctl run "echo hello"
 ```
+
+`osctl run` submits the task, waits for a terminal state, and renders the replay. Standalone embedded mode keeps task state inside that CLI process, so use the replay printed by `run`; a later `osctl status` or `osctl replay` needs a running apiserver and a configured `AGENTOS_SERVER_URL`.
 
 ### 3. Local run with LLM planning
 
@@ -102,6 +104,7 @@ cd runtime && cargo test --workspace
 ## Read Next
 
 - [Core Capabilities Reference](../reference/core-capabilities.md)
+- [Product Direction](../strategy/product-direction.md)
 - [Configuration Reference](../reference/configuration.md)
 - [Architecture Overview](../architecture/overview.md)
 - [Multiprocess Acceptance](../architecture/multiprocess-acceptance.md)

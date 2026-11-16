@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 The format follows Keep a Changelog and the project uses semantic versioning for public releases.
 
+## [Unreleased]
+
+### Added
+- Added `osctl run` as the primary governed-run path; it waits for completion and renders replay evidence.
+- Added `osctl replay` with human-readable and `--json` output.
+- Added the final task result to replay projections and Postgres task persistence.
+- Added the governed-run product direction and non-goals in English and Chinese.
+
+### Changed
+- Applied policy evaluation and audit recording to the LLM tool-calling loop.
+- Applied audit recording to policy-denied planned actions as well as denied tool calls.
+- Updated quick starts, examples, and capability docs to use the real built-in tool names and the visible replay path.
+- Changed the full-stack smoke path to `osctl run` and made local scripts bypass proxies for loopback traffic.
+
 ## [0.1.1] - 2026-03-09
 
 ### Added

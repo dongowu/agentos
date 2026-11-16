@@ -101,6 +101,15 @@ func (a *HTTPTaskAPI) GetTask(ctx context.Context, taskID string) (*access.Creat
 	return &resp, nil
 }
 
+// GetTaskReplay implements access.TaskReplayAPI.
+func (a *HTTPTaskAPI) GetTaskReplay(ctx context.Context, taskID string) (*access.TaskReplay, error) {
+	var resp access.TaskReplay
+	if err := a.doJSON(ctx, http.MethodGet, "/v1/tasks/"+taskID+"/replay", nil, "", &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 func (a *HTTPTaskAPI) ListWorkers(ctx context.Context, filters WorkerListFilters) (*WorkerListResponse, error) {
 	path := "/v1/workers"
 	query := url.Values{}
@@ -156,4 +165,5 @@ func (a *HTTPTaskAPI) doJSON(ctx context.Context, method, path string, body io.R
 }
 
 var _ access.TaskSubmissionAPI = (*HTTPTaskAPI)(nil)
+var _ access.TaskReplayAPI = (*HTTPTaskAPI)(nil)
 var _ WorkerAPI = (*HTTPTaskAPI)(nil)
